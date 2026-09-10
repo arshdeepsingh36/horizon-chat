@@ -43,4 +43,12 @@ Thumbs.db
 *.swp
 platform-tools/
 *.apk
+!apk/*.apk
 apk_output/
+
+# ADB Test Artifacts
+window_dump.xml
+*_screen.png
+photo_*.png
+s_*.png
+
