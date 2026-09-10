@@ -29,7 +29,7 @@ import com.bumptech.glide.Glide
 import com.chatapp.horizon.R
 import com.chatapp.horizon.databinding.ActivityChatBinding
 import com.chatapp.horizon.databinding.DialogAttachmentPickerBinding
-import com.chatapp.horizon.models.ChatMessage
+import com.chatapp.horizon.models.*
 import com.chatapp.horizon.network.ApiClient
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import io.socket.client.IO
