@@ -25,7 +25,7 @@ class ChatActivity : AppCompatActivity() {
     private var targetUserId: Int = 2
     private var targetUsername: String = "User"
     private var authToken: String = ""
-    private var serverUrl: String = com.chatapp.horizon.network.ApiClient.BASE_URL
+    private var serverUrl: String = com.chatapp.horizon.network.ApiClient.BASE_URL.trimEnd('/')
 
     private var isLoadingOlder = false
 

@@ -11,19 +11,19 @@ import java.util.concurrent.TimeUnit
 
 interface ApiService {
 
-    @POST("/api/auth/register")
+    @POST("api/auth/register")
     suspend fun register(@Body request: AuthRequest): Response<AuthResponse>
 
-    @POST("/api/auth/login")
+    @POST("api/auth/login")
     suspend fun login(@Body request: AuthRequest): Response<AuthResponse>
 
-    @GET("/api/users/lookup")
+    @GET("api/users/lookup")
     suspend fun lookupUser(
         @Header("Authorization") token: String,
         @Query("username") username: String
     ): Response<User>
 
-    @GET("/api/messages/{targetUserId}")
+    @GET("api/messages/{targetUserId}")
     suspend fun getMessages(
         @Header("Authorization") token: String,
         @Path("targetUserId") targetUserId: Int,
@@ -31,12 +31,12 @@ interface ApiService {
         @Query("limit") limit: Int = 25
     ): Response<List<ChatMessage>>
 
-    @GET("/api/chats")
+    @GET("api/chats")
     suspend fun getChats(
         @Header("Authorization") token: String
     ): Response<List<Conversation>>
 
-    @POST("/api/media/presign")
+    @POST("api/media/presign")
     suspend fun presignMediaUpload(
         @Header("Authorization") token: String,
         @Body request: PresignRequest
@@ -44,8 +44,8 @@ interface ApiService {
 }
 
 object ApiClient {
-    // Default URL: 10.0.2.2 for Android Studio Emulator, or user custom IP
-    var BASE_URL = "http://10.0.2.2:5000"
+    // Default URL: Live Render cloud deployment
+    var BASE_URL = "https://horizon-chat-1.onrender.com/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

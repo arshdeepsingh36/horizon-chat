@@ -43,3 +43,4 @@ Thumbs.db
 *.swp
 platform-tools/
 *.apk
+apk_output/
