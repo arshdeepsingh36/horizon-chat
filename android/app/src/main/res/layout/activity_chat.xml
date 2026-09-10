@@ -77,62 +77,209 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Telegram-Style Bottom Dock -->
-    <LinearLayout
+    <!-- Bottom Dock Container -->
+    <FrameLayout
         android:id="@+id/dockContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:background="@color/surface"
-        android:padding="8dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <ImageView
-            android:id="@+id/btnAttachment"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:src="@drawable/ic_attach_gallery"
-            app:tint="@color/text_muted"
-            android:padding="4dp"
-            android:clickable="true"
-            android:focusable="true" />
-
-        <EditText
-            android:id="@+id/etMessage"
-            android:layout_width="0dp"
+        <!-- 1. Normal Text & Media Input Bar -->
+        <LinearLayout
+            android:id="@+id/layoutNormalInput"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@null"
-            android:hint="Message"
-            android:textColor="@color/text_primary"
-            android:textColorHint="@color/text_muted"
-            android:paddingHorizontal="10dp"
-            android:maxLines="4" />
+            android:padding="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <!-- View-Once Toggle Button (1-circle icon) -->
-        <ImageView
-            android:id="@+id/btnViewOnceToggle"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginEnd="6dp"
-            android:src="@drawable/ic_view_once"
-            app:tint="@color/text_muted"
-            android:padding="4dp"
-            android:clickable="true"
-            android:focusable="true" />
+            <ImageView
+                android:id="@+id/btnAttachment"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_attach_gallery"
+                app:tint="@color/text_muted"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
 
-        <com.google.android.material.floatingactionbutton.FloatingActionButton
-            android:id="@+id/btnSend"
-            android:layout_width="wrap_content"
+            <ImageView
+                android:id="@+id/btnCamera"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_camera"
+                app:tint="@color/text_muted"
+                android:padding="4dp"
+                android:layout_marginStart="2dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <EditText
+                android:id="@+id/etMessage"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@null"
+                android:hint="Message"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_muted"
+                android:paddingHorizontal="10dp"
+                android:maxLines="4" />
+
+            <!-- View-Once Toggle Button (1-circle icon) -->
+            <ImageView
+                android:id="@+id/btnViewOnceToggle"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="6dp"
+                android:src="@drawable/ic_view_once"
+                app:tint="@color/text_muted"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- Hold-to-Record Microphone Button -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/btnMic"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:backgroundTint="@color/accent_amber"
+                app:fabCustomSize="42dp"
+                app:tint="@color/bg_base"
+                android:src="@drawable/ic_mic" />
+
+            <!-- Send Button (Shown when text is typed) -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/btnSend"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                android:backgroundTint="@color/accent_amber"
+                app:fabCustomSize="42dp"
+                app:tint="@color/bg_base"
+                android:src="@android:drawable/ic_menu_send" />
+
+        </LinearLayout>
+
+        <!-- 2. Active Recording Overlay Bar -->
+        <LinearLayout
+            android:id="@+id/layoutRecordingBar"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:backgroundTint="@color/accent_amber"
-            app:fabCustomSize="42dp"
-            app:tint="@color/bg_base"
-            android:src="@android:drawable/ic_menu_send" />
+            android:visibility="gone"
+            android:background="@color/surface"
+            android:padding="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-    </LinearLayout>
+            <ImageView
+                android:id="@+id/ivRecordingDot"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:src="@drawable/ic_recording_dot" />
+
+            <TextView
+                android:id="@+id/tvRecordingTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="0:00"
+                android:textColor="#EF4444"
+                android:textStyle="bold"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/tvRecordingHint"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="14dp"
+                android:text="Release to preview voice note"
+                android:textColor="@color/text_muted"
+                android:textSize="13sp" />
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_mic"
+                app:tint="#EF4444" />
+
+        </LinearLayout>
+
+        <!-- 3. Voice Note Staging & Playback Preview Bar -->
+        <LinearLayout
+            android:id="@+id/layoutVoicePreviewBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:background="@color/surface"
+            android:padding="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <!-- Trash / Cancel Button -->
+            <ImageView
+                android:id="@+id/btnCancelVoice"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:padding="7dp"
+                android:src="@drawable/ic_trash"
+                app:tint="#EF4444"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- Play / Pause Preview Button -->
+            <ImageView
+                android:id="@+id/btnPlayVoicePreview"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:padding="6dp"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_play_arrow"
+                app:tint="@color/accent_amber"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <!-- Progress Bar -->
+            <ProgressBar
+                android:id="@+id/pbVoicePreview"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="10dp"
+                android:progress="0"
+                android:max="100"
+                android:progressTint="@color/accent_amber"
+                android:progressBackgroundTint="@color/surface_elevated" />
+
+            <!-- Duration Label -->
+            <TextView
+                android:id="@+id/tvVoicePreviewDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0:00"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:layout_marginEnd="10dp" />
+
+            <!-- Dedicated Send Audio Button -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/btnSendVoice"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:backgroundTint="@color/accent_amber"
+                app:fabCustomSize="42dp"
+                app:tint="@color/bg_base"
+                android:src="@android:drawable/ic_menu_send" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

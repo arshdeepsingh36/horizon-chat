@@ -1,27 +1,29 @@
 package com.chatapp.horizon.ui
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Dialog
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.net.Uri
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.os.*
 import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Base64
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.FrameLayout
-import android.widget.ImageView
-import android.widget.TextView
-import android.widget.Toast
+import android.view.*
+import android.webkit.MimeTypeMap
+import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -37,8 +39,12 @@ import io.socket.client.Socket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -63,18 +69,67 @@ class ChatActivity : AppCompatActivity() {
     private var isCurrentlyTyping = false
     private val stopTypingRunnable = Runnable { stopTyping() }
 
-    // Image Picker
+    // Audio Recording
+    private var mediaRecorder: MediaRecorder? = null
+    private var activeVoiceFile: File? = null
+    private var voiceRecordingStartTime: Long = 0L
+    private val recordingTimerHandler = Handler(Looper.getMainLooper())
+    private var recordingTimerRunnable: Runnable? = null
+
+    // Audio Preview
+    private var previewMediaPlayer: MediaPlayer? = null
+    private val previewProgressHandler = Handler(Looper.getMainLooper())
+    private var previewProgressRunnable: Runnable? = null
+    private var recordedAudioDurationMs: Long = 0L
+
+    // Camera output URI
+    private var cameraOutputUri: Uri? = null
+
+    // Pickers & Launchers
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { handlePickedImage(it) }
     }
 
-    // Document Picker
     private val documentPickerLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { handlePickedDocument(it) }
+    }
+
+    private val takePhotoLauncher = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && cameraOutputUri != null) {
+            handlePickedImage(cameraOutputUri!!)
+        }
+    }
+
+    private val captureVideoLauncher = registerForActivityResult(
+        ActivityResultContracts.CaptureVideo()
+    ) { success ->
+        if (success && cameraOutputUri != null) {
+            handleCapturedVideo(cameraOutputUri!)
+        }
+    }
+
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            openCameraChoiceDialog()
+        } else {
+            Toast.makeText(this, "Camera permission is required to capture photos and videos", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(this, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,6 +148,7 @@ class ChatActivity : AppCompatActivity() {
         loadInitialMessages()
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupUI() {
         binding.tvRecipientName.text = "@$targetUsername"
         binding.btnBack.setOnClickListener { finish() }
@@ -104,6 +160,15 @@ class ChatActivity : AppCompatActivity() {
                 .into(binding.ivRecipientAvatar)
         }
 
+        // Tapping recipient avatar opens profile picture in full-screen interactive lightbox
+        binding.ivRecipientAvatar.setOnClickListener {
+            if (!targetAvatarUrl.isNullOrEmpty()) {
+                openLightboxViewer(targetAvatarUrl!!, "@$targetUsername Profile Picture")
+            } else {
+                Toast.makeText(this, "@$targetUsername (No avatar set)", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         val layoutManager = LinearLayoutManager(this).apply {
             stackFromEnd = true
         }
@@ -111,12 +176,14 @@ class ChatActivity : AppCompatActivity() {
 
         adapter = ChatAdapter(
             currentUserId = currentUserId,
-            onMediaDownloadClicked = { mediaMessage ->
-                // Media loaded
+            onMediaDownloadClicked = { /* Handled in adapter */ },
+            onViewOnceClicked = { viewOnceMsg -> showViewOnceModal(viewOnceMsg) },
+            onImageClicked = { imgMsg ->
+                if (!imgMsg.attachmentUrl.isNullOrEmpty()) {
+                    openLightboxViewer(imgMsg.attachmentUrl!!, "Photo")
+                }
             },
-            onViewOnceClicked = { viewOnceMsg ->
-                showViewOnceModal(viewOnceMsg)
-            }
+            onDocumentClicked = { docMsg -> openDocumentFile(docMsg) }
         )
         binding.rvChatMessages.adapter = adapter
 
@@ -132,7 +199,7 @@ class ChatActivity : AppCompatActivity() {
             }
         })
 
-        // Send Button
+        // Send Text Message Button
         binding.btnSend.setOnClickListener {
             val text = binding.etMessage.text.toString().trim()
             if (text.isNotEmpty()) {
@@ -155,18 +222,52 @@ class ChatActivity : AppCompatActivity() {
             updateViewOnceToggleUI()
         }
 
-        // Attachment Button
+        // Attachment Sheet Button
         binding.btnAttachment.setOnClickListener {
             showAttachmentBottomSheet()
         }
 
-        // Typing Listener
+        // Camera Button (Photo & Video)
+        binding.btnCamera.setOnClickListener {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            } else {
+                openCameraChoiceDialog()
+            }
+        }
+
+        // Hold-to-Record Microphone Button
+        binding.btnMic.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        true
+                    } else {
+                        triggerHapticFeedback()
+                        startVoiceRecording()
+                        true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    stopVoiceRecording()
+                    true
+                }
+                else -> false
+            }
+        }
+
+        // Text Change Listener (Typing indicator & Mic/Send Button Toggle)
         binding.etMessage.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 if (!s.isNullOrEmpty()) {
+                    binding.btnMic.visibility = View.GONE
+                    binding.btnSend.visibility = View.VISIBLE
                     startTyping()
                 } else {
+                    binding.btnMic.visibility = View.VISIBLE
+                    binding.btnSend.visibility = View.GONE
                     stopTyping()
                 }
             }
@@ -174,42 +275,452 @@ class ChatActivity : AppCompatActivity() {
         })
     }
 
-    private fun startTyping() {
-        if (!isCurrentlyTyping) {
-            isCurrentlyTyping = true
-            val payload = JSONObject().apply {
-                put("recipientId", targetUserId)
+    private fun triggerHapticFeedback() {
+        try {
+            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(50)
             }
-            mSocket?.emit("typing_start", payload)
-        }
-        typingHandler.removeCallbacks(stopTypingRunnable)
-        typingHandler.postDelayed(stopTypingRunnable, 1500)
-    }
-
-    private fun stopTyping() {
-        if (isCurrentlyTyping) {
-            isCurrentlyTyping = false
-            typingHandler.removeCallbacks(stopTypingRunnable)
-            val payload = JSONObject().apply {
-                put("recipientId", targetUserId)
-            }
-            mSocket?.emit("typing_stop", payload)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
-    private fun updateViewOnceToggleUI() {
-        if (isViewOnceActive) {
-            binding.btnViewOnceToggle.setColorFilter(
-                ContextCompat.getColor(this, R.color.accent_amber)
+    // ==========================================
+    // 1. HOLD-TO-RECORD VOICE NOTE IMPLEMENTATION
+    // ==========================================
+    private fun startVoiceRecording() {
+        try {
+            val audioDir = File(cacheDir, "voice_notes").apply { mkdirs() }
+            activeVoiceFile = File(audioDir, "voice_${System.currentTimeMillis()}.m4a")
+
+            mediaRecorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()).apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(64000)
+                setAudioSamplingRate(44100)
+                setOutputFile(activeVoiceFile!!.absolutePath)
+                prepare()
+                start()
+            }
+
+            voiceRecordingStartTime = System.currentTimeMillis()
+            binding.layoutNormalInput.visibility = View.GONE
+            binding.layoutRecordingBar.visibility = View.VISIBLE
+            binding.tvRecordingTimer.text = "0:00"
+
+            // Pulse red dot animation
+            binding.ivRecordingDot.animate().alpha(0.2f).setDuration(400).withEndAction {
+                binding.ivRecordingDot.animate().alpha(1.0f).setDuration(400).start()
+            }.start()
+
+            recordingTimerRunnable = object : Runnable {
+                override fun run() {
+                    val elapsedSec = ((System.currentTimeMillis() - voiceRecordingStartTime) / 1000).toInt()
+                    binding.tvRecordingTimer.text = String.format("%d:%02d", elapsedSec / 60, elapsedSec % 60)
+                    recordingTimerHandler.postDelayed(this, 1000)
+                }
+            }
+            recordingTimerHandler.post(recordingTimerRunnable!!)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Failed to start recording: ${e.message}", Toast.LENGTH_SHORT).show()
+            restoreNormalInputDock()
+        }
+    }
+
+    private fun stopVoiceRecording() {
+        recordingTimerRunnable?.let { recordingTimerHandler.removeCallbacks(it) }
+
+        try {
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            mediaRecorder = null
+        }
+
+        val elapsedMs = System.currentTimeMillis() - voiceRecordingStartTime
+        if (elapsedMs < 1000 || activeVoiceFile == null || !activeVoiceFile!!.exists()) {
+            activeVoiceFile?.delete()
+            activeVoiceFile = null
+            restoreNormalInputDock()
+            Toast.makeText(this, "Hold microphone to record voice note", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Decouple recording from immediate dispatch: Swap input bar to Preview & Staging Bar
+        recordedAudioDurationMs = elapsedMs
+        val totalSec = (elapsedMs / 1000).toInt()
+        val durationFormatted = String.format("%d:%02d", totalSec / 60, totalSec % 60)
+
+        binding.layoutRecordingBar.visibility = View.GONE
+        binding.layoutVoicePreviewBar.visibility = View.VISIBLE
+        binding.tvVoicePreviewDuration.text = durationFormatted
+        binding.pbVoicePreview.progress = 0
+
+        setupVoicePreviewUI(activeVoiceFile!!, elapsedMs)
+    }
+
+    private fun setupVoicePreviewUI(file: File, durationMs: Long) {
+        cleanVoicePreviewState()
+        binding.btnPlayVoicePreview.setImageResource(R.drawable.ic_play_arrow)
+
+        binding.btnPlayVoicePreview.setOnClickListener {
+            if (previewMediaPlayer == null) {
+                previewMediaPlayer = MediaPlayer().apply {
+                    setDataSource(file.absolutePath)
+                    prepare()
+                    setOnCompletionListener {
+                        binding.btnPlayVoicePreview.setImageResource(R.drawable.ic_play_arrow)
+                        binding.pbVoicePreview.progress = 0
+                        previewProgressRunnable?.let { r -> previewProgressHandler.removeCallbacks(r) }
+                    }
+                    start()
+                }
+                binding.btnPlayVoicePreview.setImageResource(R.drawable.ic_pause_circle)
+                startPreviewProgressUpdater()
+            } else if (previewMediaPlayer!!.isPlaying) {
+                previewMediaPlayer!!.pause()
+                binding.btnPlayVoicePreview.setImageResource(R.drawable.ic_play_arrow)
+                previewProgressRunnable?.let { r -> previewProgressHandler.removeCallbacks(r) }
+            } else {
+                previewMediaPlayer!!.start()
+                binding.btnPlayVoicePreview.setImageResource(R.drawable.ic_pause_circle)
+                startPreviewProgressUpdater()
+            }
+        }
+
+        // Cancel / Trash button
+        binding.btnCancelVoice.setOnClickListener {
+            cleanVoicePreviewState()
+            file.delete()
+            activeVoiceFile = null
+            restoreNormalInputDock()
+            Toast.makeText(this, "Voice note discarded", Toast.LENGTH_SHORT).show()
+        }
+
+        // Dedicated Send button
+        binding.btnSendVoice.setOnClickListener {
+            cleanVoicePreviewState()
+            restoreNormalInputDock()
+            uploadAndSendVoiceNote(file, durationMs)
+        }
+    }
+
+    private fun startPreviewProgressUpdater() {
+        previewProgressRunnable = object : Runnable {
+            override fun run() {
+                val mp = previewMediaPlayer
+                if (mp != null && mp.isPlaying && mp.duration > 0) {
+                    val progress = ((mp.currentPosition.toDouble() / mp.duration) * 100).toInt()
+                    binding.pbVoicePreview.progress = progress
+                    previewProgressHandler.postDelayed(this, 100)
+                }
+            }
+        }
+        previewProgressHandler.post(previewProgressRunnable!!)
+    }
+
+    private fun cleanVoicePreviewState() {
+        previewProgressRunnable?.let { previewProgressHandler.removeCallbacks(it) }
+        try {
+            previewMediaPlayer?.stop()
+            previewMediaPlayer?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            previewMediaPlayer = null
+        }
+    }
+
+    private fun restoreNormalInputDock() {
+        binding.layoutRecordingBar.visibility = View.GONE
+        binding.layoutVoicePreviewBar.visibility = View.GONE
+        binding.layoutNormalInput.visibility = View.VISIBLE
+    }
+
+    private fun uploadAndSendVoiceNote(file: File, durationMs: Long) {
+        val totalSec = (durationMs / 1000).toInt()
+        val durationText = String.format("%d:%02d", totalSec / 60, totalSec % 60)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val bytes = file.readBytes()
+                val base64 = "data:audio/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val uploadReq = MediaUploadRequest(
+                    imageBase64 = base64,
+                    fileName = "voice_${System.currentTimeMillis()}.m4a",
+                    fileSizeBytes = bytes.size.toLong(),
+                    thumbnailBlur = null
+                )
+                val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
+                val finalUrl = if (response.isSuccessful && response.body() != null) {
+                    response.body()!!.attachmentUrl
+                } else {
+                    base64
+                }
+
+                val viewOnce = isViewOnceActive
+                withContext(Dispatchers.Main) {
+                    isViewOnceActive = false
+                    updateViewOnceToggleUI()
+                    sendMessage(
+                        text = durationText,
+                        attachmentType = "AUDIO",
+                        attachmentUrl = finalUrl,
+                        thumbnailBlur = null,
+                        fileSizeBytes = bytes.size.toLong(),
+                        isViewOnce = viewOnce
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Failed to upload voice note: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                file.delete()
+                activeVoiceFile = null
+            }
+        }
+    }
+
+    // ====================================================
+    // 2. FULL-SCREEN LIGHTBOX VIEWER (IMAGES & AVATARS)
+    // ====================================================
+    private fun openLightboxViewer(imageUrl: String, titleText: String) {
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val frameLayout = FrameLayout(this).apply {
+            setBackgroundColor(ContextCompat.getColor(context, R.color.bg_base))
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
             )
-            Toast.makeText(this, "View Once: ON for next media", Toast.LENGTH_SHORT).show()
+        }
+
+        // Pinch-to-zoom interactive ImageView
+        val imageView = ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+
+        val matrix = Matrix()
+        var scaleFactor = 1f
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                scaleFactor *= detector.scaleFactor
+                scaleFactor = Math.max(0.75f, Math.min(scaleFactor, 5.0f))
+                matrix.setScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
+                imageView.imageMatrix = matrix
+                return true
+            }
+        })
+
+        imageView.setOnTouchListener { _, event ->
+            if (imageView.scaleType != ImageView.ScaleType.MATRIX) {
+                imageView.scaleType = ImageView.ScaleType.MATRIX
+            }
+            scaleDetector.onTouchEvent(event)
+            true
+        }
+        frameLayout.addView(imageView)
+
+        // Top bar container
+        val topBar = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 40
+                leftMargin = 20
+                rightMargin = 20
+            }
+        }
+
+        val tvTitle = TextView(this).apply {
+            text = titleText
+            setTextColor(ContextCompat.getColor(context, R.color.accent_amber))
+            textSize = 15f
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }
+        }
+        topBar.addView(tvTitle)
+
+        val btnClose = TextView(this).apply {
+            text = "✕ CLOSE"
+            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
+            textSize = 14f
+            setPadding(20, 14, 20, 14)
+            setBackgroundColor(ContextCompat.getColor(context, R.color.surface_elevated))
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+            setOnClickListener { dialog.dismiss() }
+        }
+        topBar.addView(btnClose)
+        frameLayout.addView(topBar)
+
+        dialog.setContentView(frameLayout)
+
+        if (imageUrl.startsWith("data:image/")) {
+            try {
+                val cleanBase64 = imageUrl.substringAfter("base64,")
+                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                imageView.setImageBitmap(bitmap)
+            } catch (e: Exception) {
+                Glide.with(this).load(imageUrl).into(imageView)
+            }
         } else {
-            binding.btnViewOnceToggle.setColorFilter(
-                ContextCompat.getColor(this, R.color.text_muted)
-            )
+            Glide.with(this).load(imageUrl).into(imageView)
+        }
+
+        dialog.show()
+    }
+
+    // ====================================================
+    // 2b. NATIVE DOCUMENT VIEWER VIA FILEPROVIDER
+    // ====================================================
+    private fun openDocumentFile(msg: ChatMessage) {
+        val docName = if (!msg.messageText.isNullOrEmpty()) msg.messageText!! else "Document.pdf"
+        val docsDir = File(cacheDir, "documents").apply { mkdirs() }
+        val localFile = File(docsDir, docName)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                if (!localFile.exists()) {
+                    if (!msg.attachmentUrl.isNullOrEmpty() && msg.attachmentUrl!!.startsWith("http")) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@ChatActivity, "Downloading $docName...", Toast.LENGTH_SHORT).show()
+                        }
+                        val client = OkHttpClient()
+                        val request = Request.Builder().url(msg.attachmentUrl!!).build()
+                        val response = client.newCall(request).execute()
+                        if (response.isSuccessful && response.body != null) {
+                            FileOutputStream(localFile).use { it.write(response.body!!.bytes()) }
+                        }
+                    } else {
+                        // Generate sample document payload for local verification
+                        localFile.writeText("Horizon Chat Document: $docName\nCreated for demonstration.")
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    try {
+                        val contentUri = FileProvider.getUriForFile(
+                            this@ChatActivity,
+                            "${packageName}.fileprovider",
+                            localFile
+                        )
+                        val ext = MimeTypeMap.getFileExtensionFromUrl(localFile.name)
+                        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(contentUri, mimeType)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Toast.makeText(this@ChatActivity, "Document saved: ${localFile.name}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Failed to open document: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
+    // ====================================================
+    // 3. NATIVE ANDROID CAMERA INTEGRATION (PHOTO & VIDEO)
+    // ====================================================
+    private fun openCameraChoiceDialog() {
+        val options = arrayOf("📸 Take Photo", "🎥 Record Video")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Camera")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> launchNativeCameraPhoto()
+                    1 -> launchNativeCameraVideo()
+                }
+            }
+            .show()
+    }
+
+    private fun launchNativeCameraPhoto() {
+        val cameraDir = File(cacheDir, "camera").apply { mkdirs() }
+        val photoFile = File(cameraDir, "photo_${System.currentTimeMillis()}.jpg")
+        cameraOutputUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", photoFile)
+        takePhotoLauncher.launch(cameraOutputUri)
+    }
+
+    private fun launchNativeCameraVideo() {
+        val cameraDir = File(cacheDir, "camera").apply { mkdirs() }
+        val videoFile = File(cameraDir, "video_${System.currentTimeMillis()}.mp4")
+        cameraOutputUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", videoFile)
+        captureVideoLauncher.launch(cameraOutputUri)
+    }
+
+    private fun handleCapturedVideo(uri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                val bytes = inputStream?.readBytes() ?: ByteArray(0)
+                inputStream?.close()
+
+                val base64 = "data:video/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val uploadReq = MediaUploadRequest(
+                    imageBase64 = base64,
+                    fileName = "video_${System.currentTimeMillis()}.mp4",
+                    fileSizeBytes = bytes.size.toLong(),
+                    thumbnailBlur = null
+                )
+                val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
+                val finalUrl = if (response.isSuccessful && response.body() != null) {
+                    response.body()!!.attachmentUrl
+                } else {
+                    base64
+                }
+
+                val viewOnce = isViewOnceActive
+                withContext(Dispatchers.Main) {
+                    isViewOnceActive = false
+                    updateViewOnceToggleUI()
+                    sendMessage(
+                        text = "Video",
+                        attachmentType = "VIDEO",
+                        attachmentUrl = finalUrl,
+                        thumbnailBlur = null,
+                        fileSizeBytes = bytes.size.toLong(),
+                        isViewOnce = viewOnce
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Failed to send video: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // ====================================================
+    // 4. ATTACHMENT BOTTOM SHEET & PICKERS
+    // ====================================================
     private fun showAttachmentBottomSheet() {
         val bottomSheet = BottomSheetDialog(this)
         val sheetBinding = DialogAttachmentPickerBinding.inflate(layoutInflater)
@@ -228,10 +739,10 @@ class ChatActivity : AppCompatActivity() {
             imagePickerLauncher.launch("image/*")
         }
 
-        // 2. Voice Note
+        // 2. Voice Note Guidance
         sheetBinding.btnOptionVoice.setOnClickListener {
             bottomSheet.dismiss()
-            sendVoiceNote()
+            Toast.makeText(this, "Hold the mic icon on the bottom right to record voice notes", Toast.LENGTH_LONG).show()
         }
 
         // 3. Location
@@ -268,7 +779,7 @@ class ChatActivity : AppCompatActivity() {
                         originalBitmap
                     }
 
-                    // 1. Generate 20x20 micro-blur thumbnail
+                    // 1. Generate 20x20 micro-blur thumbnail (~200 bytes)
                     val microThumb = Bitmap.createScaledBitmap(scaledBitmap, 20, 20, true)
                     val thumbStream = ByteArrayOutputStream()
                     microThumb.compress(Bitmap.CompressFormat.JPEG, 60, thumbStream)
@@ -304,7 +815,7 @@ class ChatActivity : AppCompatActivity() {
                         uploadErr.printStackTrace()
                     }
 
-                    // 4. If upload request failed, fallback to direct data URI so recipient still sees the actual image
+                    // 4. Fallback to direct data URI if offline
                     val finalUrl = uploadedUrl ?: fullBase64
 
                     withContext(Dispatchers.Main) {
@@ -354,18 +865,6 @@ class ChatActivity : AppCompatActivity() {
         )
     }
 
-    private fun sendVoiceNote() {
-        val durationText = "0:14"
-        sendMessage(
-            text = durationText,
-            attachmentType = "AUDIO",
-            attachmentUrl = "https://cdn.horizonchat.io/audio/voice_note.aac",
-            thumbnailBlur = null,
-            fileSizeBytes = 54200,
-            isViewOnce = false
-        )
-    }
-
     private fun sendLocation() {
         val coordsText = "30.7333° N, 76.7794° E"
         sendMessage(
@@ -378,8 +877,26 @@ class ChatActivity : AppCompatActivity() {
         )
     }
 
+    private fun updateViewOnceToggleUI() {
+        if (isViewOnceActive) {
+            binding.btnViewOnceToggle.setColorFilter(
+                ContextCompat.getColor(this, R.color.accent_amber)
+            )
+            Toast.makeText(this, "View Once: ON for next media", Toast.LENGTH_SHORT).show()
+        } else {
+            binding.btnViewOnceToggle.setColorFilter(
+                ContextCompat.getColor(this, R.color.text_muted)
+            )
+        }
+    }
+
     private fun showViewOnceModal(msg: ChatMessage) {
         val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        dialog.window?.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE
+        )
+
         val frameLayout = FrameLayout(this).apply {
             setBackgroundColor(ContextCompat.getColor(context, R.color.bg_base))
             layoutParams = ViewGroup.LayoutParams(
@@ -388,7 +905,6 @@ class ChatActivity : AppCompatActivity() {
             )
         }
 
-        // Fullscreen Image
         val imageView = ImageView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -398,7 +914,6 @@ class ChatActivity : AppCompatActivity() {
         }
         frameLayout.addView(imageView)
 
-        // Top bar container
         val topBar = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -456,7 +971,6 @@ class ChatActivity : AppCompatActivity() {
         }
 
         dialog.setOnDismissListener {
-            // Mark viewed via REST and Socket
             adapter.markMessageViewed(msg.id)
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
@@ -470,12 +984,15 @@ class ChatActivity : AppCompatActivity() {
                 put("recipientId", targetUserId)
             }
             mSocket?.emit("mark_media_viewed", payload)
-            Toast.makeText(this, "Photo closed and permanently deleted.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Photo closed and permanently expired.", Toast.LENGTH_SHORT).show()
         }
 
         dialog.show()
     }
 
+    // ==========================================
+    // 5. WEBSOCKET GATEWAY & REAL-TIME RECEIPTS
+    // ==========================================
     private fun setupSocket() {
         try {
             val options = IO.Options().apply {
@@ -496,6 +1013,7 @@ class ChatActivity : AppCompatActivity() {
                                 adapter.appendMessage(msg)
                                 binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
                                 if (msg.senderId == targetUserId) {
+                                    markMessageDelivered(msg.id)
                                     markMessageRead(msg.id)
                                 }
                             }
@@ -504,6 +1022,20 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
+            // Real-Time Delivery Receipt Acknowledgement
+            mSocket?.on("message_delivered_ack") { args ->
+                if (args.isNotEmpty()) {
+                    val data = args[0] as? JSONObject
+                    val messageId = data?.optLong("messageId") ?: -1L
+                    if (messageId != -1L) {
+                        runOnUiThread {
+                            adapter.markMessageDelivered(messageId)
+                        }
+                    }
+                }
+            }
+
+            // Real-Time Read Receipt Acknowledgement
             mSocket?.on("message_read_ack") { args ->
                 if (args.isNotEmpty()) {
                     val data = args[0] as? JSONObject
@@ -516,6 +1048,7 @@ class ChatActivity : AppCompatActivity() {
                 }
             }
 
+            // Scoped Real-Time Typing Indicators
             mSocket?.on("user_typing") { args ->
                 if (args.isNotEmpty()) {
                     val data = args[0] as? JSONObject
@@ -566,6 +1099,29 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    private fun startTyping() {
+        if (!isCurrentlyTyping) {
+            isCurrentlyTyping = true
+            val payload = JSONObject().apply {
+                put("recipientId", targetUserId)
+            }
+            mSocket?.emit("typing_start", payload)
+        }
+        typingHandler.removeCallbacks(stopTypingRunnable)
+        typingHandler.postDelayed(stopTypingRunnable, 2500)
+    }
+
+    private fun stopTyping() {
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false
+            typingHandler.removeCallbacks(stopTypingRunnable)
+            val payload = JSONObject().apply {
+                put("recipientId", targetUserId)
+            }
+            mSocket?.emit("typing_stop", payload)
+        }
+    }
+
     private fun loadInitialMessages() {
         if (authToken.isEmpty()) return
         lifecycleScope.launch(Dispatchers.IO) {
@@ -580,9 +1136,10 @@ class ChatActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         adapter.setMessages(list)
                         binding.rvChatMessages.scrollToPosition(adapter.itemCount - 1)
-                        // Mark incoming messages as read
+                        // Acknowledge delivery & read for all unread incoming messages
                         list.forEach { msg ->
                             if (msg.senderId == targetUserId && msg.status != "READ") {
+                                markMessageDelivered(msg.id)
                                 markMessageRead(msg.id)
                             }
                         }
@@ -632,8 +1189,9 @@ class ChatActivity : AppCompatActivity() {
         fileSizeBytes: Long,
         isViewOnce: Boolean
     ) {
+        val tempId = System.currentTimeMillis()
         val optimisticMsg = ChatMessage(
-            id = System.currentTimeMillis(),
+            id = tempId,
             senderId = currentUserId,
             recipientId = targetUserId,
             messageText = text,
@@ -660,7 +1218,27 @@ class ChatActivity : AppCompatActivity() {
             if (fileSizeBytes > 0) put("fileSizeBytes", fileSizeBytes)
             put("isViewOnce", isViewOnce)
         }
-        mSocket?.emit("send_message", payload)
+
+        mSocket?.emit("send_message", payload) { ackArgs ->
+            if (ackArgs.isNotEmpty()) {
+                val ackObj = ackArgs[0] as? JSONObject
+                val savedObj = ackObj?.optJSONObject("message")
+                if (savedObj != null) {
+                    val serverMsg = parseJsonMessage(savedObj)
+                    runOnUiThread {
+                        adapter.updateOptimisticMessage(tempId, serverMsg)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun markMessageDelivered(messageId: Long) {
+        val payload = JSONObject().apply {
+            put("messageId", messageId)
+            put("senderId", targetUserId)
+        }
+        mSocket?.emit("mark_delivered", payload)
     }
 
     private fun markMessageRead(messageId: Long) {
@@ -691,6 +1269,14 @@ class ChatActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopTyping()
+        cleanVoicePreviewState()
+        try {
+            mediaRecorder?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        mediaRecorder = null
+        recordingTimerRunnable?.let { recordingTimerHandler.removeCallbacks(it) }
         mSocket?.disconnect()
         mSocket?.off()
     }

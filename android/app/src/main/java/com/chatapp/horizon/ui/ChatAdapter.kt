@@ -25,7 +25,9 @@ import com.chatapp.horizon.models.ChatMessage
 class ChatAdapter(
     private val currentUserId: Int,
     private val onMediaDownloadClicked: (ChatMessage) -> Unit,
-    private val onViewOnceClicked: (ChatMessage) -> Unit = {}
+    private val onViewOnceClicked: (ChatMessage) -> Unit = {},
+    private val onImageClicked: (ChatMessage) -> Unit = {},
+    private val onDocumentClicked: (ChatMessage) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -64,6 +66,22 @@ class ChatAdapter(
         val index = messages.indexOfFirst { it.id == messageId }
         if (index != -1) {
             messages[index].status = "READ"
+            notifyItemChanged(index)
+        }
+    }
+
+    fun markMessageDelivered(messageId: Long) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1 && messages[index].status != "READ") {
+            messages[index].status = "DELIVERED"
+            notifyItemChanged(index)
+        }
+    }
+
+    fun updateOptimisticMessage(tempId: Long, serverMsg: ChatMessage) {
+        val index = messages.indexOfFirst { it.id == tempId }
+        if (index != -1) {
+            messages[index] = serverMsg
             notifyItemChanged(index)
         }
     }
@@ -123,10 +141,10 @@ class ChatAdapter(
         when (holder) {
             is SentTextViewHolder -> holder.bind(msg)
             is ReceivedTextViewHolder -> holder.bind(msg)
-            is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked)
+            is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked, onImageClicked)
             is VoiceViewHolder -> holder.bind(msg, isSent)
             is LocationViewHolder -> holder.bind(msg, isSent)
-            is DocViewHolder -> holder.bind(msg, isSent)
+            is DocViewHolder -> holder.bind(msg, isSent, onDocumentClicked)
         }
     }
 
@@ -153,7 +171,8 @@ class ChatAdapter(
             msg: ChatMessage,
             isSent: Boolean,
             onDownloadClicked: (ChatMessage) -> Unit,
-            onViewOnceClicked: (ChatMessage) -> Unit
+            onViewOnceClicked: (ChatMessage) -> Unit,
+            onImageClicked: (ChatMessage) -> Unit
         ) {
             val context = itemView.context
             val params = binding.cardMedia.layoutParams as ConstraintLayout.LayoutParams
@@ -203,7 +222,8 @@ class ChatAdapter(
 
             // REGULAR MEDIA HANDLING
             binding.viewOnceOverlay.visibility = View.GONE
-            binding.downloadOverlay.visibility = View.VISIBLE
+
+            var isFullImageLoaded = false
 
             if (!msg.thumbnailBlur.isNullOrEmpty()) {
                 try {
@@ -213,6 +233,13 @@ class ChatAdapter(
                     binding.ivThumbnail.setImageBitmap(bitmap)
                 } catch (e: Exception) {
                     binding.ivThumbnail.setImageResource(R.drawable.ic_attach_gallery)
+                }
+            }
+
+            // Clicking downloaded image opens full-screen lightbox
+            binding.ivThumbnail.setOnClickListener {
+                if (isFullImageLoaded || binding.downloadOverlay.visibility == View.GONE) {
+                    onImageClicked(msg)
                 }
             }
 
@@ -228,13 +255,16 @@ class ChatAdapter(
                             val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
                             val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
                             binding.ivThumbnail.setImageBitmap(bitmap)
+                            isFullImageLoaded = true
                         } catch (e: Exception) {
                             Glide.with(context).load(msg.attachmentUrl).into(binding.ivThumbnail)
+                            isFullImageLoaded = true
                         }
                     } else {
                         Glide.with(context)
                             .load(msg.attachmentUrl)
                             .into(binding.ivThumbnail)
+                        isFullImageLoaded = true
                     }
                     binding.pbLoading.visibility = View.GONE
                 }
@@ -316,7 +346,11 @@ class ChatAdapter(
 
     class DocViewHolder(private val binding: ItemChatDocBinding) :
         RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage, isSent: Boolean) {
+        fun bind(
+            msg: ChatMessage,
+            isSent: Boolean,
+            onDocumentClicked: (ChatMessage) -> Unit
+        ) {
             val context = itemView.context
             val params = binding.cardDoc.layoutParams as ConstraintLayout.LayoutParams
             if (isSent) {
@@ -339,7 +373,10 @@ class ChatAdapter(
             binding.tvDocSize.text = if (msg.fileSizeBytes > 0) formatFileSize(msg.fileSizeBytes) else "Document File"
 
             binding.btnDownloadDoc.setOnClickListener {
-                Toast.makeText(context, "Opening $docName...", Toast.LENGTH_SHORT).show()
+                onDocumentClicked(msg)
+            }
+            binding.cardDoc.setOnClickListener {
+                onDocumentClicked(msg)
             }
         }
     }
@@ -362,9 +399,25 @@ private fun updateTicks(imageView: ImageView, status: String) {
     }
 }
 
-private fun formatTimestamp(iso: String): String {
+private fun formatTimestamp(iso: String?): String {
+    if (iso.isNullOrEmpty()) return ""
     return try {
-        iso.substring(11, 16)
+        val utcFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val date = try {
+            utcFormat.parse(iso)
+        } catch (e: Exception) {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(iso)
+        }
+        if (date != null) {
+            val localFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+            localFormat.format(date)
+        } else {
+            iso.substring(11, 16)
+        }
     } catch (e: Exception) {
         "12:00"
     }

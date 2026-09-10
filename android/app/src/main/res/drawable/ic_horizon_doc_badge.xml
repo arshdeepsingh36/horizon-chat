@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="40dp"
+    android:height="40dp"
+    android:viewportWidth="40"
+    android:viewportHeight="40">
+    <!-- Outer Brand Background Circle -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M20,20m-19,0a19,19 0,1 1,38 0a19,19 0,1 1,-38 0" />
+    <path
+        android:strokeColor="#EA580C"
+        android:strokeWidth="1.5"
+        android:pathData="M20,20m-18,0a18,18 0,1 1,36 0a18,18 0,1 1,-36 0" />
+    <!-- Horizon Sunset Bubble -->
+    <path
+        android:fillColor="#EA580C"
+        android:pathData="M13,12h14c1.6,0 3,1.4 3,3v9c0,1.6 -1.4,3 -3,3h-10l-4,3v-3h-0.5c-1.6,0 -3,-1.4 -3,-3v-9c0,-1.6 1.4,-3 3,-3z"/>
+    <!-- Horizon Horizon Accent Lines -->
+    <path
+        android:fillColor="#FDE68A"
+        android:pathData="M17,19h7v1.5h-7zM17,16h4.5v1.5h-4.5z"/>
+</vector>

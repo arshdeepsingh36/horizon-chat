@@ -558,6 +558,26 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Delivery Receipt Acknowledgement
+  socket.on('mark_delivered', async ({ messageId, senderId }) => {
+    if (!messageId) return;
+
+    try {
+      await updateMessageStatus(messageId, 'DELIVERED');
+
+      // Emit message_delivered_ack to sender active socket
+      const sId = Number(senderId);
+      const senderSockets = onlineUsers.get(sId);
+      if (senderSockets) {
+        senderSockets.forEach(sockId => {
+          io.to(sockId).emit('message_delivered_ack', { messageId: Number(messageId) });
+        });
+      }
+    } catch (err) {
+      console.error('[MARK DELIVERED ERROR]', err);
+    }
+  });
+
   // Read Receipt Acknowledgement (TRD Section 4.3)
   socket.on('mark_read', async ({ messageId, senderId }) => {
     if (!messageId) return;
