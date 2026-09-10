@@ -16,12 +16,24 @@
             android:layout_height="?attr/actionBarSize">
 
             <TextView
+                android:id="@+id/tvAppTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Messages"
                 android:textColor="@color/text_primary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
+
+            <ImageView
+                android:id="@+id/btnSettings"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="16dp"
+                android:src="@drawable/ic_settings"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
 
         </androidx.appcompat.widget.Toolbar>
 

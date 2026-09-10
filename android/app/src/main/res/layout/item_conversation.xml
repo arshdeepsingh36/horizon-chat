@@ -12,11 +12,18 @@
         android:layout_height="48dp"
         android:layout_marginEnd="14dp">
 
+        <ImageView
+            android:id="@+id/ivAvatar"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/tvAvatarInitials"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:background="@color/surface_elevated"
+            android:background="@drawable/circle_avatar_bg"
             android:gravity="center"
             android:textColor="@color/text_primary"
             android:textSize="18sp"

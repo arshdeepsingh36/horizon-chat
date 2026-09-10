@@ -44,13 +44,13 @@
                     android:textColor="#FED7AA"
                     android:textSize="11sp" />
 
-                <!-- Double Tick Status (Sent, Delivered, Read) -->
+                <!-- Double Tick Status (Clean vector without box) -->
                 <ImageView
                     android:id="@+id/ivTicks"
                     android:layout_width="16dp"
                     android:layout_height="16dp"
                     android:layout_marginStart="4dp"
-                    android:src="@android:drawable/checkbox_on_background"
+                    android:src="@drawable/ic_tick_double"
                     app:tint="@color/ticks_read" />
 
             </LinearLayout>

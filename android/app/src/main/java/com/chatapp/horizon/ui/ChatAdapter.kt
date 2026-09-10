@@ -1,28 +1,41 @@
 package com.chatapp.horizon.ui
 
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.Toast
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.chatapp.horizon.R
+import com.chatapp.horizon.databinding.ItemChatDocBinding
+import com.chatapp.horizon.databinding.ItemChatLocationBinding
 import com.chatapp.horizon.databinding.ItemChatSentMediaBinding
+import com.chatapp.horizon.databinding.ItemChatVoiceBinding
 import com.chatapp.horizon.databinding.ItemMessageReceivedBinding
 import com.chatapp.horizon.databinding.ItemMessageSentBinding
 import com.chatapp.horizon.models.ChatMessage
 
 class ChatAdapter(
     private val currentUserId: Int,
-    private val onMediaDownloadClicked: (ChatMessage) -> Unit
+    private val onMediaDownloadClicked: (ChatMessage) -> Unit,
+    private val onViewOnceClicked: (ChatMessage) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
         private const val TYPE_SENT_TEXT = 1
         private const val TYPE_RECEIVED_TEXT = 2
         private const val TYPE_SENT_MEDIA = 3
+        private const val TYPE_RECEIVED_MEDIA = 4
+        private const val TYPE_VOICE = 5
+        private const val TYPE_LOCATION = 6
+        private const val TYPE_DOCUMENT = 7
         private const val MAX_HEAP_ITEMS = 200
     }
 
@@ -55,6 +68,14 @@ class ChatAdapter(
         }
     }
 
+    fun markMessageViewed(messageId: Long) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index].isViewed = true
+            notifyItemChanged(index)
+        }
+    }
+
     fun getOldestMessageId(): Long? {
         return messages.firstOrNull()?.id
     }
@@ -72,7 +93,12 @@ class ChatAdapter(
         val msg = messages[position]
         val isSent = msg.senderId == currentUserId
         return when {
-            isSent && msg.attachmentType == "IMAGE" -> TYPE_SENT_MEDIA
+            msg.attachmentType == "AUDIO" -> TYPE_VOICE
+            msg.attachmentType == "LOCATION" -> TYPE_LOCATION
+            msg.attachmentType == "DOCUMENT" -> TYPE_DOCUMENT
+            msg.attachmentType == "IMAGE" || msg.isViewOnce -> {
+                if (isSent) TYPE_SENT_MEDIA else TYPE_RECEIVED_MEDIA
+            }
             isSent -> TYPE_SENT_TEXT
             else -> TYPE_RECEIVED_TEXT
         }
@@ -82,24 +108,32 @@ class ChatAdapter(
         val inflater = LayoutInflater.from(parent.context)
         return when (viewType) {
             TYPE_SENT_TEXT -> SentTextViewHolder(ItemMessageSentBinding.inflate(inflater, parent, false))
-            TYPE_SENT_MEDIA -> SentMediaViewHolder(ItemChatSentMediaBinding.inflate(inflater, parent, false))
-            else -> ReceivedTextViewHolder(ItemMessageReceivedBinding.inflate(inflater, parent, false))
+            TYPE_RECEIVED_TEXT -> ReceivedTextViewHolder(ItemMessageReceivedBinding.inflate(inflater, parent, false))
+            TYPE_SENT_MEDIA, TYPE_RECEIVED_MEDIA -> MediaViewHolder(ItemChatSentMediaBinding.inflate(inflater, parent, false))
+            TYPE_VOICE -> VoiceViewHolder(ItemChatVoiceBinding.inflate(inflater, parent, false))
+            TYPE_LOCATION -> LocationViewHolder(ItemChatLocationBinding.inflate(inflater, parent, false))
+            TYPE_DOCUMENT -> DocViewHolder(ItemChatDocBinding.inflate(inflater, parent, false))
+            else -> SentTextViewHolder(ItemMessageSentBinding.inflate(inflater, parent, false))
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val msg = messages[position]
+        val isSent = msg.senderId == currentUserId
         when (holder) {
             is SentTextViewHolder -> holder.bind(msg)
-            is SentMediaViewHolder -> holder.bind(msg, onMediaDownloadClicked)
             is ReceivedTextViewHolder -> holder.bind(msg)
+            is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked)
+            is VoiceViewHolder -> holder.bind(msg, isSent)
+            is LocationViewHolder -> holder.bind(msg, isSent)
+            is DocViewHolder -> holder.bind(msg, isSent)
         }
     }
 
     class SentTextViewHolder(private val binding: ItemMessageSentBinding) :
         RecyclerView.ViewHolder(binding.root) {
         fun bind(msg: ChatMessage) {
-            binding.tvMessageBody.text = msg.messageText
+            binding.tvMessageBody.text = msg.messageText ?: ""
             binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
             updateTicks(binding.ivTicks, msg.status)
         }
@@ -108,25 +142,78 @@ class ChatAdapter(
     class ReceivedTextViewHolder(private val binding: ItemMessageReceivedBinding) :
         RecyclerView.ViewHolder(binding.root) {
         fun bind(msg: ChatMessage) {
-            binding.tvReceivedMessageBody.text = msg.messageText
+            binding.tvReceivedMessageBody.text = msg.messageText ?: ""
             binding.tvReceivedTimestamp.text = formatTimestamp(msg.createdAt)
         }
     }
 
-    class SentMediaViewHolder(private val binding: ItemChatSentMediaBinding) :
+    class MediaViewHolder(private val binding: ItemChatSentMediaBinding) :
         RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage, onDownloadClicked: (ChatMessage) -> Unit) {
-            binding.tvCaption.text = msg.messageText
+        fun bind(
+            msg: ChatMessage,
+            isSent: Boolean,
+            onDownloadClicked: (ChatMessage) -> Unit,
+            onViewOnceClicked: (ChatMessage) -> Unit
+        ) {
+            val context = itemView.context
+            val params = binding.cardMedia.layoutParams as ConstraintLayout.LayoutParams
+            if (isSent) {
+                params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                params.startToStart = ConstraintLayout.LayoutParams.UNSET
+                binding.cardMedia.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_sent))
+                binding.ivTicks.visibility = View.VISIBLE
+                updateTicks(binding.ivTicks, msg.status)
+            } else {
+                params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                params.endToEnd = ConstraintLayout.LayoutParams.UNSET
+                binding.cardMedia.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_received))
+                binding.ivTicks.visibility = View.GONE
+            }
+            binding.cardMedia.layoutParams = params
+
+            binding.tvCaption.text = msg.messageText ?: ""
             binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
             binding.tvFileSize.text = formatFileSize(msg.fileSizeBytes)
-            updateTicks(binding.ivTicks, msg.status)
 
-            // Decode 20x20 micro-blur Base64 string
+            // VIEW ONCE HANDLING
+            if (msg.isViewOnce) {
+                binding.downloadOverlay.visibility = View.GONE
+                binding.viewOnceOverlay.visibility = View.VISIBLE
+                binding.ivThumbnail.setImageDrawable(null)
+
+                if (msg.isViewed) {
+                    binding.ivViewOnceIcon.setImageResource(R.drawable.ic_view_once_opened)
+                    binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.text_muted))
+                    binding.tvViewOnceStatus.text = "Opened"
+                    binding.tvViewOnceSub.text = "Expired"
+                    binding.viewOnceOverlay.setOnClickListener {
+                        Toast.makeText(context, "This photo has already been opened.", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    binding.ivViewOnceIcon.setImageResource(R.drawable.ic_view_once)
+                    binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.accent_amber))
+                    binding.tvViewOnceStatus.text = "1 Photo (View Once)"
+                    binding.tvViewOnceSub.text = "Tap to open"
+                    binding.viewOnceOverlay.setOnClickListener {
+                        onViewOnceClicked(msg)
+                    }
+                }
+                return
+            }
+
+            // REGULAR MEDIA HANDLING
+            binding.viewOnceOverlay.visibility = View.GONE
+            binding.downloadOverlay.visibility = View.VISIBLE
+
             if (!msg.thumbnailBlur.isNullOrEmpty()) {
-                val cleanBase64 = msg.thumbnailBlur.substringAfter("base64,")
-                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-                val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-                binding.ivThumbnail.setImageBitmap(bitmap)
+                try {
+                    val cleanBase64 = msg.thumbnailBlur.substringAfter("base64,")
+                    val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                    val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                    binding.ivThumbnail.setImageBitmap(bitmap)
+                } catch (e: Exception) {
+                    binding.ivThumbnail.setImageResource(R.drawable.ic_attach_gallery)
+                }
             }
 
             binding.downloadOverlay.setOnClickListener {
@@ -134,9 +221,8 @@ class ChatAdapter(
                 binding.pbLoading.visibility = View.VISIBLE
                 onDownloadClicked(msg)
 
-                // Load high-res binary
                 if (!msg.attachmentUrl.isNullOrEmpty()) {
-                    Glide.with(itemView.context)
+                    Glide.with(context)
                         .load(msg.attachmentUrl)
                         .into(binding.ivThumbnail)
                     binding.pbLoading.visibility = View.GONE
@@ -144,21 +230,123 @@ class ChatAdapter(
             }
         }
     }
+
+    class VoiceViewHolder(private val binding: ItemChatVoiceBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        fun bind(msg: ChatMessage, isSent: Boolean) {
+            val context = itemView.context
+            val params = binding.cardVoice.layoutParams as ConstraintLayout.LayoutParams
+            if (isSent) {
+                params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                params.startToStart = ConstraintLayout.LayoutParams.UNSET
+                binding.cardVoice.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_sent))
+                binding.ivTicks.visibility = View.VISIBLE
+                updateTicks(binding.ivTicks, msg.status)
+            } else {
+                params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                params.endToEnd = ConstraintLayout.LayoutParams.UNSET
+                binding.cardVoice.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_received))
+                binding.ivTicks.visibility = View.GONE
+            }
+            binding.cardVoice.layoutParams = params
+
+            binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
+            binding.tvDuration.text = if (!msg.messageText.isNullOrEmpty()) msg.messageText else "0:12"
+
+            var isPlaying = false
+            binding.btnPlayPause.setOnClickListener {
+                isPlaying = !isPlaying
+                if (isPlaying) {
+                    binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
+                    binding.pbAudioProgress.progress = 65
+                    Toast.makeText(context, "Playing voice note...", Toast.LENGTH_SHORT).show()
+                } else {
+                    binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
+                    binding.pbAudioProgress.progress = 0
+                }
+            }
+        }
+    }
+
+    class LocationViewHolder(private val binding: ItemChatLocationBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        fun bind(msg: ChatMessage, isSent: Boolean) {
+            val context = itemView.context
+            val params = binding.cardLocation.layoutParams as ConstraintLayout.LayoutParams
+            if (isSent) {
+                params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                params.startToStart = ConstraintLayout.LayoutParams.UNSET
+                binding.cardLocation.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_sent))
+                binding.ivTicks.visibility = View.VISIBLE
+                updateTicks(binding.ivTicks, msg.status)
+            } else {
+                params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                params.endToEnd = ConstraintLayout.LayoutParams.UNSET
+                binding.cardLocation.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_received))
+                binding.ivTicks.visibility = View.GONE
+            }
+            binding.cardLocation.layoutParams = params
+
+            binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
+            binding.tvCoordinates.text = if (!msg.messageText.isNullOrEmpty()) msg.messageText else "30.7333° N, 76.7794° E"
+
+            binding.btnOpenMaps.setOnClickListener {
+                val coords = binding.tvCoordinates.text.toString()
+                try {
+                    val uri = Uri.parse("geo:0,0?q=$coords")
+                    val intent = Intent(Intent.ACTION_VIEW, uri)
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Coordinates: $coords", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    class DocViewHolder(private val binding: ItemChatDocBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        fun bind(msg: ChatMessage, isSent: Boolean) {
+            val context = itemView.context
+            val params = binding.cardDoc.layoutParams as ConstraintLayout.LayoutParams
+            if (isSent) {
+                params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                params.startToStart = ConstraintLayout.LayoutParams.UNSET
+                binding.cardDoc.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_sent))
+                binding.ivTicks.visibility = View.VISIBLE
+                updateTicks(binding.ivTicks, msg.status)
+            } else {
+                params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                params.endToEnd = ConstraintLayout.LayoutParams.UNSET
+                binding.cardDoc.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_received))
+                binding.ivTicks.visibility = View.GONE
+            }
+            binding.cardDoc.layoutParams = params
+
+            binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
+            val docName = if (!msg.messageText.isNullOrEmpty()) msg.messageText else "Document.pdf"
+            binding.tvDocName.text = docName
+            binding.tvDocSize.text = if (msg.fileSizeBytes > 0) formatFileSize(msg.fileSizeBytes) else "Document File"
+
+            binding.btnDownloadDoc.setOnClickListener {
+                Toast.makeText(context, "Opening $docName...", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 }
 
-private fun updateTicks(imageView: android.widget.ImageView, status: String) {
+private fun updateTicks(imageView: ImageView, status: String) {
     when (status) {
         "READ" -> {
-            imageView.setImageResource(android.R.drawable.checkbox_on_background)
+            imageView.setImageResource(R.drawable.ic_tick_double)
             imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.ticks_read))
         }
         "DELIVERED" -> {
-            imageView.setImageResource(android.R.drawable.checkbox_on_background)
-            imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.text_muted))
+            imageView.setImageResource(R.drawable.ic_tick_double)
+            imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.ticks_sent))
         }
         else -> {
-            imageView.setImageResource(android.R.drawable.ic_menu_send)
-            imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.text_muted))
+            imageView.setImageResource(R.drawable.ic_tick_single)
+            imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.ticks_sent))
         }
     }
 }

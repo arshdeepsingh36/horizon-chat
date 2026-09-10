@@ -17,7 +17,10 @@ import {
   getMessagesCursor,
   saveMessageTRD,
   updateMessageStatus,
-  getUserConversations
+  getUserConversations,
+  updateUserProfile,
+  updateUserPassword,
+  markMediaViewed
 } from './db.js';
 
 dotenv.config();
@@ -159,11 +162,104 @@ app.get('/api/users/lookup', authenticateToken, async (req, res) => {
     return res.json({
       id: user.id,
       username: user.username,
+      displayName: user.display_name || user.username,
+      bioStatus: user.bio_status || 'Hey there! I am using Horizon Chat.',
+      avatarUrl: user.avatar_url || null,
       online: isUserOnline(user.id)
     });
   } catch (err) {
     console.error('[LOOKUP ERROR]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 3b. Current User Profile (Phase 2)
+app.get('/api/users/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await findUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name || user.username,
+      bioStatus: user.bio_status || 'Hey there! I am using Horizon Chat.',
+      avatarUrl: user.avatar_url || null,
+      createdAt: user.created_at
+    });
+  } catch (err) {
+    console.error('[PROFILE ME ERROR]', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 3c. Update Profile (Phase 2)
+app.put('/api/users/profile', authenticateToken, async (req, res) => {
+  try {
+    const { displayName, bioStatus, avatarUrl } = req.body || {};
+    const updated = await updateUserProfile(req.user.id, {
+      displayName: displayName !== undefined ? displayName.trim() : null,
+      bioStatus: bioStatus !== undefined ? bioStatus.trim() : null,
+      avatarUrl: avatarUrl !== undefined ? avatarUrl : null
+    });
+
+    return res.json({
+      success: true,
+      user: {
+        id: updated.id,
+        username: updated.username,
+        displayName: updated.display_name || updated.username,
+        bioStatus: updated.bio_status,
+        avatarUrl: updated.avatar_url
+      }
+    });
+  } catch (err) {
+    console.error('[UPDATE PROFILE ERROR]', err);
+    return res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// 3d. Update Password (Phase 2)
+app.put('/api/users/password', authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+
+    const user = await findUserByUsername(req.user.username);
+    if (!user || !(await bcrypt.compare(currentPassword, user.password_hash))) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await updateUserPassword(req.user.id, newHash);
+    return res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('[UPDATE PASSWORD ERROR]', err);
+    return res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+// 3e. Mark View-Once Media Viewed (Phase 2)
+app.post('/api/messages/:id/view-once', authenticateToken, async (req, res) => {
+  try {
+    const messageId = parseInt(req.params.id, 10);
+    const updated = await markMediaViewed(messageId);
+    if (!updated) return res.status(404).json({ error: 'Message not found' });
+
+    // Broadcast to sender via Socket.IO
+    const senderSockets = onlineUsers.get(updated.senderId);
+    if (senderSockets) {
+      senderSockets.forEach(sockId => {
+        io.to(sockId).emit('media_viewed', { messageId, viewedBy: req.user.id });
+      });
+    }
+
+    return res.json({ success: true, message: updated });
+  } catch (err) {
+    console.error('[MARK VIEW ONCE ERROR]', err);
+    return res.status(500).json({ error: 'Failed to mark media viewed' });
   }
 });
 
@@ -294,9 +390,18 @@ io.on('connection', (socket) => {
     status: 'online'
   });
 
-  // Outbound Message Event (TRD Section 4.2)
+  // Outbound Message Event (TRD Section 4.2 + Phase 2)
   socket.on('send_message', async (data, callback) => {
-    const { recipientId, text, attachmentType = 'NONE', attachmentUrl = null, thumbnailBlur = null, fileSizeBytes = 0, replyToId = null } = data || {};
+    const { 
+      recipientId, 
+      text, 
+      attachmentType = 'NONE', 
+      attachmentUrl = null, 
+      thumbnailBlur = null, 
+      fileSizeBytes = 0, 
+      isViewOnce = false,
+      replyToId = null 
+    } = data || {};
 
     if (!recipientId || (!text && !attachmentUrl)) return;
 
@@ -305,7 +410,7 @@ io.on('connection', (socket) => {
     const initialStatus = recipientOnline ? 'DELIVERED' : 'SENT';
 
     try {
-      // 1. Write to PostgreSQL
+      // 1. Write to database
       const savedRecord = await saveMessageTRD({
         senderId: userId,
         recipientId: rId,
@@ -315,6 +420,7 @@ io.on('connection', (socket) => {
         thumbnailBlur,
         fileSizeBytes,
         status: initialStatus,
+        isViewOnce: Boolean(isViewOnce),
         replyToId
       });
 
@@ -323,11 +429,21 @@ io.on('connection', (socket) => {
         callback({ success: true, message: savedRecord });
       }
 
-      // 3. Emit new_message to recipient socket ID
+      // 3. Emit new_message to recipient sockets
       const recipientSockets = onlineUsers.get(rId);
       if (recipientSockets) {
         recipientSockets.forEach(sockId => {
           io.to(sockId).emit('new_message', savedRecord);
+        });
+      }
+
+      // 4. Also emit to sender's other sockets (multi-device sync)
+      const senderSockets = onlineUsers.get(userId);
+      if (senderSockets) {
+        senderSockets.forEach(sockId => {
+          if (sockId !== socket.id) {
+            io.to(sockId).emit('new_message', savedRecord);
+          }
         });
       }
     } catch (err) {
@@ -335,6 +451,44 @@ io.on('connection', (socket) => {
       if (typeof callback === 'function') {
         callback({ success: false, error: 'Database write failed' });
       }
+    }
+  });
+
+  // Typing Indicators (Phase 2)
+  socket.on('typing_start', ({ recipientId }) => {
+    if (!recipientId) return;
+    const targetSockets = onlineUsers.get(Number(recipientId));
+    if (targetSockets) {
+      targetSockets.forEach(sId => {
+        io.to(sId).emit('user_typing', { userId, isTyping: true });
+      });
+    }
+  });
+
+  socket.on('typing_stop', ({ recipientId }) => {
+    if (!recipientId) return;
+    const targetSockets = onlineUsers.get(Number(recipientId));
+    if (targetSockets) {
+      targetSockets.forEach(sId => {
+        io.to(sId).emit('user_typing', { userId, isTyping: false });
+      });
+    }
+  });
+
+  // Ephemeral View-Once Socket Acknowledgment (Phase 2)
+  socket.on('mark_media_viewed', async ({ messageId, senderId }) => {
+    if (!messageId) return;
+    try {
+      const updated = await markMediaViewed(Number(messageId));
+      const sId = Number(senderId);
+      const senderSockets = onlineUsers.get(sId);
+      if (senderSockets) {
+        senderSockets.forEach(sockId => {
+          io.to(sockId).emit('media_viewed', { messageId: Number(messageId), viewedBy: userId });
+        });
+      }
+    } catch (err) {
+      console.error('[MARK MEDIA VIEWED ERROR]', err);
     }
   });
 

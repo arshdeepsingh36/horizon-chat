@@ -11,14 +11,18 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.chatapp.horizon.databinding.ActivityChatListBinding
 import com.chatapp.horizon.network.ApiClient
+import io.socket.client.IO
+import io.socket.client.Socket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class ChatListActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityChatListBinding
     private lateinit var adapter: ChatListAdapter
+    private var mSocket: Socket? = null
 
     private var authToken: String = ""
     private var currentUserId: Int = 1
@@ -35,6 +39,7 @@ class ChatListActivity : AppCompatActivity() {
         currentUsername = intent.getStringExtra("CURRENT_USERNAME") ?: prefs.getString("username", "User") ?: "User"
 
         setupUI()
+        setupSocket()
         loadChats()
     }
 
@@ -44,13 +49,15 @@ class ChatListActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        binding.toolbar.title = "Horizon Chat (@$currentUsername)"
+        binding.tvAppTitle.text = "Horizon Chat (@$currentUsername)"
 
         adapter = ChatListAdapter { conversation ->
             val intent = Intent(this, ChatActivity::class.java).apply {
                 putExtra("CURRENT_USER_ID", currentUserId)
                 putExtra("TARGET_USER_ID", conversation.partnerId)
                 putExtra("TARGET_USERNAME", conversation.partnerUsername)
+                putExtra("TARGET_DISPLAY_NAME", conversation.partnerDisplayName ?: conversation.partnerUsername)
+                putExtra("TARGET_AVATAR_URL", conversation.partnerAvatarUrl)
                 putExtra("AUTH_TOKEN", authToken)
             }
             startActivity(intent)
@@ -59,8 +66,56 @@ class ChatListActivity : AppCompatActivity() {
         binding.rvConversationList.layoutManager = LinearLayoutManager(this)
         binding.rvConversationList.adapter = adapter
 
+        binding.btnSettings.setOnClickListener {
+            startActivity(Intent(this, ProfileActivity::class.java))
+        }
+
         binding.fabNewChat.setOnClickListener {
             showNewChatDialog()
+        }
+    }
+
+    private fun setupSocket() {
+        if (authToken.isEmpty()) return
+        try {
+            val options = IO.Options().apply {
+                auth = mapOf("token" to authToken)
+                reconnection = true
+            }
+            val serverUrl = ApiClient.BASE_URL.trimEnd('/')
+            mSocket = IO.socket(serverUrl, options)
+
+            mSocket?.on("user_typing") { args ->
+                if (args.isNotEmpty()) {
+                    val data = args[0] as? JSONObject
+                    val uId = data?.optInt("userId") ?: return@on
+                    val isTyping = data.optBoolean("isTyping", false)
+                    runOnUiThread {
+                        adapter.setTyping(uId, isTyping)
+                    }
+                }
+            }
+
+            mSocket?.on("user_status_changed") { args ->
+                if (args.isNotEmpty()) {
+                    val data = args[0] as? JSONObject
+                    val uId = data?.optInt("userId") ?: return@on
+                    val status = data.optString("status", "offline")
+                    runOnUiThread {
+                        adapter.setUserOnline(uId, status == "online")
+                    }
+                }
+            }
+
+            mSocket?.on("new_message") {
+                runOnUiThread {
+                    loadChats()
+                }
+            }
+
+            mSocket?.connect()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -107,11 +162,13 @@ class ChatListActivity : AppCompatActivity() {
                 val response = ApiClient.apiService.lookupUser("Bearer $authToken", username)
                 withContext(Dispatchers.Main) {
                     if (response.isSuccessful && response.body() != null) {
-                        val targetUser = response.body()!!
+                        val user = response.body()!!
                         val intent = Intent(this@ChatListActivity, ChatActivity::class.java).apply {
                             putExtra("CURRENT_USER_ID", currentUserId)
-                            putExtra("TARGET_USER_ID", targetUser.id)
-                            putExtra("TARGET_USERNAME", targetUser.username)
+                            putExtra("TARGET_USER_ID", user.id)
+                            putExtra("TARGET_USERNAME", user.username)
+                            putExtra("TARGET_DISPLAY_NAME", user.displayName ?: user.username)
+                            putExtra("TARGET_AVATAR_URL", user.avatarUrl)
                             putExtra("AUTH_TOKEN", authToken)
                         }
                         startActivity(intent)
@@ -121,9 +178,15 @@ class ChatListActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatListActivity, "Network error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChatListActivity, "Lookup error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mSocket?.disconnect()
+        mSocket?.off()
     }
 }

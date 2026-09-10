@@ -41,6 +41,29 @@ interface ApiService {
         @Header("Authorization") token: String,
         @Body request: PresignRequest
     ): Response<PresignResponse>
+
+    @GET("api/users/me")
+    suspend fun getProfile(
+        @Header("Authorization") token: String
+    ): Response<User>
+
+    @PUT("api/users/profile")
+    suspend fun updateProfile(
+        @Header("Authorization") token: String,
+        @Body request: UpdateProfileRequest
+    ): Response<ProfileResponse>
+
+    @PUT("api/users/password")
+    suspend fun updatePassword(
+        @Header("Authorization") token: String,
+        @Body request: UpdatePasswordRequest
+    ): Response<GenericResponse>
+
+    @POST("api/messages/{id}/view-once")
+    suspend fun markViewOnceOpened(
+        @Header("Authorization") token: String,
+        @Path("id") messageId: Long
+    ): Response<GenericResponse>
 }
 
 object ApiClient {

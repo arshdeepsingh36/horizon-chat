@@ -9,6 +9,15 @@ data class User(
     @SerializedName("username")
     val username: String,
 
+    @SerializedName("displayName")
+    val displayName: String? = null,
+
+    @SerializedName("bioStatus")
+    val bioStatus: String? = null,
+
+    @SerializedName("avatarUrl")
+    val avatarUrl: String? = null,
+
     @SerializedName("online")
     var online: Boolean = false
 )
@@ -36,6 +45,15 @@ data class Conversation(
     @SerializedName("partnerUsername")
     val partnerUsername: String,
 
+    @SerializedName("partnerDisplayName")
+    val partnerDisplayName: String? = null,
+
+    @SerializedName("partnerAvatarUrl")
+    val partnerAvatarUrl: String? = null,
+
+    @SerializedName("partnerBioStatus")
+    val partnerBioStatus: String? = null,
+
     @SerializedName("lastMessage")
     val lastMessage: ChatMessage? = null,
 
@@ -43,7 +61,44 @@ data class Conversation(
     val unreadCount: Int = 0,
 
     @SerializedName("online")
-    var online: Boolean = false
+    var online: Boolean = false,
+
+    var isTyping: Boolean = false
+)
+
+data class UpdateProfileRequest(
+    @SerializedName("displayName")
+    val displayName: String?,
+
+    @SerializedName("bioStatus")
+    val bioStatus: String?,
+
+    @SerializedName("avatarUrl")
+    val avatarUrl: String?
+)
+
+data class UpdatePasswordRequest(
+    @SerializedName("currentPassword")
+    val currentPassword: String,
+
+    @SerializedName("newPassword")
+    val newPassword: String
+)
+
+data class GenericResponse(
+    @SerializedName("success")
+    val success: Boolean,
+
+    @SerializedName("message")
+    val message: String? = null
+)
+
+data class ProfileResponse(
+    @SerializedName("success")
+    val success: Boolean,
+
+    @SerializedName("user")
+    val user: User
 )
 
 data class PresignRequest(

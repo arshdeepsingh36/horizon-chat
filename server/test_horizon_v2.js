@@ -126,11 +126,90 @@ async function runTests() {
   console.log(`✓ Page 2 loaded via cursor ID ${oldestInPage1}: ${page2.length} messages`);
   if (page2.length === 0) throw new Error('Expected older messages in page 2');
 
+  // 7. Phase 2: Profile Settings & Password Update
+  console.log('--- Phase 2 Features Verification ---');
+  const meRes = await (await fetch(`${API_BASE}/api/users/me`, {
+    headers: { Authorization: `Bearer ${token1}` }
+  })).json();
+  console.log(`✓ Profile me: @${meRes.username}, displayName: ${meRes.displayName}, bio: ${meRes.bioStatus}`);
+
+  const updateProfileRes = await (await fetch(`${API_BASE}/api/users/profile`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token1}`
+    },
+    body: JSON.stringify({
+      displayName: 'Arshdeep Singh',
+      bioStatus: 'Vibe coding Phase 2 🚀',
+      avatarUrl: 'https://pub-r2.storage.cloud/avatars/sample_avatar.png'
+    })
+  })).json();
+  if (updateProfileRes.user.displayName !== 'Arshdeep Singh') throw new Error('Profile update failed');
+  console.log(`✓ Profile updated: ${updateProfileRes.user.displayName}, bio: "${updateProfileRes.user.bioStatus}"`);
+
+  // Password update
+  const newPass = 'BrandNewPassword2026';
+  const passRes = await (await fetch(`${API_BASE}/api/users/password`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token1}`
+    },
+    body: JSON.stringify({
+      currentPassword: pass,
+      newPassword: newPass
+    })
+  })).json();
+  if (!passRes.success) throw new Error('Password update failed');
+  console.log('✓ Password update verified.');
+
+  // Login with new password
+  const reLogin = await (await fetch(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: u1Name, password: newPass })
+  })).json();
+  if (!reLogin.token) throw new Error('Login with new password failed');
+  console.log('✓ Successfully authenticated with new updated password.');
+
+  // 8. Phase 2: View-Once Ephemeral Media
+  const viewOnceMsg = await new Promise(resolve => {
+    sock1.emit('send_message', {
+      recipientId: user2.id,
+      text: 'Secret ephemeral snapshot',
+      attachmentType: 'IMAGE',
+      attachmentUrl: presignRes.publicUrl,
+      thumbnailBlur: presignRes.thumbnailBlur,
+      fileSizeBytes: 1024500,
+      isViewOnce: true
+    }, resolve);
+  });
+  console.log(`✓ View-once message sent (ID: ${viewOnceMsg.message.id}, isViewOnce: ${viewOnceMsg.message.isViewOnce})`);
+  if (!viewOnceMsg.message.isViewOnce) throw new Error('View once flag missing');
+
+  // Mark view once as opened
+  const viewedRes = await (await fetch(`${API_BASE}/api/messages/${viewOnceMsg.message.id}/view-once`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token2}` }
+  })).json();
+  if (!viewedRes.message.isViewed) throw new Error('Failed to mark media viewed');
+  console.log(`✓ View-once media marked as viewed/opened (isViewed: ${viewedRes.message.isViewed})`);
+
+  // 9. Phase 2: Typing Indicators
+  const typingPromise = new Promise(resolve => {
+    sock2.on('user_typing', resolve);
+  });
+  sock1.emit('typing_start', { recipientId: user2.id });
+  const typingEvent = await typingPromise;
+  console.log(`✓ Real-time typing event received: user ${typingEvent.userId} isTyping=${typingEvent.isTyping}`);
+  if (!typingEvent.isTyping) throw new Error('Typing indicator failed');
+
   sock1.disconnect();
   sock2.disconnect();
 
   console.log('====================================================');
-  console.log('ALL HORIZON CHAT v2.0.0 TESTS PASSED SUCCESSFULLY');
+  console.log('ALL HORIZON CHAT PHASE 2 TESTS PASSED SUCCESSFULLY');
   console.log('====================================================');
   process.exit(0);
 }

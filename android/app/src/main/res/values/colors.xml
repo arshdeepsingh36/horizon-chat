@@ -2,15 +2,21 @@
 <resources>
     <!-- Horizon Chat Sunset Glow & Twilight Ocean Palette -->
     <color name="bg_base">#0E1626</color>
+    <color name="background_dark">#0E1626</color>
     <color name="surface">#162238</color>
     <color name="surface_elevated">#1E293B</color>
     <color name="bubble_sent">#EA580C</color>
     <color name="bubble_received">#24334D</color>
+    <color name="primary_coral">#EA580C</color>
+    <color name="primary_coral_dark">#C2410C</color>
     <color name="accent_amber">#F59E0B</color>
     <color name="accent_glow">#FBBF24</color>
     <color name="text_primary">#FFFBEB</color>
+    <color name="text_secondary">#CBD5E1</color>
     <color name="text_muted">#94A3B8</color>
     <color name="ticks_sent">#CBD5E1</color>
     <color name="ticks_read">#FDE68A</color>
     <color name="overlay_blur">#770E1626</color>
+    <color name="online_green">#10B981</color>
+    <color name="error_red">#EF4444</color>
 </resources>

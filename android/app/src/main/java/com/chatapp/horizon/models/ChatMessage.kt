@@ -30,6 +30,12 @@ data class ChatMessage(
     @SerializedName("status")
     var status: String = "SENT", // SENT, DELIVERED, READ
 
+    @SerializedName("is_view_once")
+    val isViewOnce: Boolean = false,
+
+    @SerializedName("is_viewed")
+    var isViewed: Boolean = false,
+
     @SerializedName("reply_to_id")
     val replyToId: Long? = null,
 
