@@ -1219,7 +1219,7 @@ class ChatActivity : AppCompatActivity() {
             put("isViewOnce", isViewOnce)
         }
 
-        mSocket?.emit("send_message", payload) { ackArgs ->
+        mSocket?.emit("send_message", payload, io.socket.client.Ack { ackArgs ->
             if (ackArgs.isNotEmpty()) {
                 val ackObj = ackArgs[0] as? JSONObject
                 val savedObj = ackObj?.optJSONObject("message")
@@ -1230,7 +1230,7 @@ class ChatActivity : AppCompatActivity() {
                     }
                 }
             }
-        }
+        })
     }
 
     private fun markMessageDelivered(messageId: Long) {

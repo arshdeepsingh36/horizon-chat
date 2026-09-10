@@ -21,6 +21,9 @@ import com.chatapp.horizon.databinding.ItemChatVoiceBinding
 import com.chatapp.horizon.databinding.ItemMessageReceivedBinding
 import com.chatapp.horizon.databinding.ItemMessageSentBinding
 import com.chatapp.horizon.models.ChatMessage
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 class ChatAdapter(
     private val currentUserId: Int,
