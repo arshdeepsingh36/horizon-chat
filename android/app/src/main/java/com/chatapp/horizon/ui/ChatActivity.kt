@@ -101,16 +101,18 @@ class ChatActivity : AppCompatActivity() {
     private val takePhotoLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
-        if (success && cameraOutputUri != null) {
-            handlePickedImage(cameraOutputUri!!)
+        val uri = cameraOutputUri
+        if (success && uri != null) {
+            handlePickedImage(uri)
         }
     }
 
     private val captureVideoLauncher = registerForActivityResult(
         ActivityResultContracts.CaptureVideo()
     ) { success ->
-        if (success && cameraOutputUri != null) {
-            handleCapturedVideo(cameraOutputUri!)
+        val uri = cameraOutputUri
+        if (success && uri != null) {
+            handleCapturedVideo(uri)
         }
     }
 
