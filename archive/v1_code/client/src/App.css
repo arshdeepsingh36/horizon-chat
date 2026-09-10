@@ -1,0 +1,1058 @@
+/* Android WhatsApp UI Styles */
+
+.android-device-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Realistic Android Phone Mockup Container */
+.android-phone {
+  width: 100%;
+  height: 100%;
+  max-width: 440px;
+  max-height: 900px;
+  background-color: var(--wa-panel-bg);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+@media (min-width: 500px) {
+  .android-phone {
+    height: 94vh;
+    border-radius: 36px;
+    border: 8px solid #20262B;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.8), 0 0 0 2px rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* Fullscreen mode on small viewports */
+@media (max-width: 499px) {
+  .android-phone {
+    border: none;
+    border-radius: 0;
+    max-width: 100%;
+    height: 100%;
+  }
+}
+
+/* Android Status Bar */
+.android-status-bar {
+  height: 28px;
+  background-color: var(--wa-header-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #D1D5DB;
+  z-index: 50;
+  user-select: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wa-status-icon {
+  color: var(--wa-teal);
+  display: inline-flex;
+}
+
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Android Soft Navigation Bar */
+.android-nav-bar {
+  height: 20px;
+  background-color: var(--wa-panel-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  user-select: none;
+}
+
+.android-gesture-pill {
+  width: 72px;
+  height: 4px;
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+}
+
+/* Viewport Scale Control */
+.screen-mode-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background-color: rgba(31, 44, 52, 0.8);
+  border: 1px solid var(--wa-border);
+  color: var(--wa-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.screen-mode-toggle:hover {
+  background-color: var(--wa-header-bg);
+  color: var(--wa-text-primary);
+}
+
+/* ======================================================== */
+/* WHATSAPP AUTH SCREEN                                     */
+/* ======================================================== */
+.wa-auth-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  background-color: var(--wa-dark-bg);
+  text-align: center;
+  animation: popIn 0.25s ease-out;
+}
+
+.wa-auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.wa-auth-logo-circle {
+  width: 72px;
+  height: 72px;
+  background: linear-gradient(135deg, #00A884, #0284C7);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 10px 24px rgba(0, 168, 132, 0.35);
+}
+
+.wa-auth-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--wa-text-primary);
+}
+
+.wa-auth-subtitle {
+  font-size: 13px;
+  color: var(--wa-text-secondary);
+  max-width: 280px;
+  line-height: 1.4;
+}
+
+.wa-auth-box {
+  width: 100%;
+  background-color: var(--wa-header-bg);
+  border: 1px solid var(--wa-border);
+  border-radius: 18px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wa-tab-switch {
+  display: flex;
+  background-color: var(--wa-panel-bg);
+  border-radius: 10px;
+  padding: 3px;
+  border: 1px solid var(--wa-border);
+}
+
+.wa-tab-btn {
+  flex: 1;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  color: var(--wa-text-secondary);
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wa-tab-btn.active {
+  background-color: var(--wa-header-bg);
+  color: var(--wa-teal);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.wa-input-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.wa-input-label {
+  font-size: 12px;
+  color: var(--wa-teal);
+  font-weight: 600;
+}
+
+.wa-input-wrapper {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  background-color: var(--wa-panel-bg);
+  border: 1px solid var(--wa-border);
+  border-radius: 10px;
+  padding: 0 12px;
+  transition: border-color 0.2s ease;
+}
+
+.wa-input-wrapper:focus-within {
+  border-color: var(--wa-teal);
+}
+
+.wa-input-prefix {
+  color: var(--wa-teal);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.wa-input-field {
+  width: 100%;
+  height: 44px;
+  background: transparent;
+  border: none;
+  color: var(--wa-text-primary);
+  font-size: 15px;
+  outline: none;
+}
+
+.wa-btn-primary {
+  width: 100%;
+  height: 44px;
+  background-color: var(--wa-teal);
+  color: #111B21;
+  font-size: 14px;
+  font-weight: 700;
+  border: none;
+  border-radius: 22px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.wa-btn-primary:hover {
+  background-color: var(--wa-teal-hover);
+  transform: translateY(-1px);
+}
+
+.wa-error-banner {
+  background-color: var(--wa-danger-bg);
+  border: 1px solid var(--wa-danger);
+  color: #FFA4AD;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.wa-privacy-note {
+  font-size: 11px;
+  color: var(--wa-text-muted);
+  line-height: 1.4;
+  margin-top: 12px;
+}
+
+/* ======================================================== */
+/* WHATSAPP CHAT LIST SCREEN                                */
+/* ======================================================== */
+.wa-chat-list-screen {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--wa-panel-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+/* WhatsApp Android Top Bar */
+.wa-app-bar {
+  background-color: var(--wa-header-bg);
+  padding: 10px 16px 4px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.wa-app-bar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wa-app-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--wa-text-primary);
+  letter-spacing: 0.01em;
+}
+
+.wa-app-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  color: var(--wa-text-secondary);
+}
+
+.wa-action-icon {
+  background: none;
+  border: none;
+  color: var(--wa-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: color 0.15s ease;
+}
+
+.wa-action-icon:hover {
+  color: var(--wa-text-primary);
+}
+
+/* Tabs Bar */
+.wa-tabs-bar {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  margin-top: 2px;
+}
+
+.wa-tab-item {
+  flex: 1;
+  text-align: center;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--wa-text-secondary);
+  cursor: pointer;
+  position: relative;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.wa-tab-item.active {
+  color: var(--wa-teal);
+}
+
+.wa-tab-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background-color: var(--wa-teal);
+  border-radius: 3px 3px 0 0;
+}
+
+.wa-badge-pill {
+  background-color: var(--wa-teal);
+  color: #111B21;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 12px;
+}
+
+/* Search Bar (Collapsible / Active) */
+.wa-search-container {
+  padding: 8px 14px;
+  background-color: var(--wa-panel-bg);
+  border-bottom: 1px solid var(--wa-border);
+}
+
+.wa-search-input-box {
+  background-color: var(--wa-search-bg);
+  border-radius: 8px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--wa-text-secondary);
+}
+
+.wa-search-input {
+  background: transparent;
+  border: none;
+  color: var(--wa-text-primary);
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+}
+
+.wa-search-input::placeholder {
+  color: var(--wa-text-secondary);
+}
+
+/* Chat List Scrollable Feed */
+.wa-chats-feed {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.wa-chat-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 14px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  position: relative;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.wa-chat-item:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* Contact Avatar */
+.wa-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 18px;
+  flex-shrink: 0;
+  position: relative;
+  text-transform: uppercase;
+}
+
+.wa-avatar-presence {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 12px;
+  height: 12px;
+  background-color: var(--wa-teal);
+  border: 2px solid var(--wa-panel-bg);
+  border-radius: 50%;
+}
+
+.wa-chat-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wa-chat-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wa-contact-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--wa-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-chat-time {
+  font-size: 11px;
+  color: var(--wa-text-secondary);
+  flex-shrink: 0;
+}
+
+.wa-chat-time.unread {
+  color: var(--wa-teal);
+  font-weight: 600;
+}
+
+.wa-chat-row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.wa-last-msg-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--wa-text-secondary);
+}
+
+.wa-last-msg-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-unread-badge {
+  background-color: var(--wa-teal);
+  color: #111B21;
+  font-size: 11px;
+  font-weight: 800;
+  min-width: 19px;
+  height: 19px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  flex-shrink: 0;
+}
+
+/* Floating Action Button (FAB) */
+.wa-fab {
+  position: absolute;
+  bottom: 24px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: var(--wa-teal);
+  color: #111B21;
+  border: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+  z-index: 30;
+}
+
+.wa-fab:hover {
+  transform: scale(1.06);
+  background-color: var(--wa-teal-hover);
+}
+
+/* ======================================================== */
+/* 1-ON-1 WHATSAPP CHAT VIEW                                */
+/* ======================================================== */
+.wa-chat-view {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Chat Header */
+.wa-chat-header {
+  height: 58px;
+  background-color: var(--wa-header-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.wa-header-partner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.wa-back-btn {
+  background: none;
+  border: none;
+  color: var(--wa-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.wa-back-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.wa-header-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.wa-header-title-block {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wa-header-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--wa-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-header-subtitle {
+  font-size: 11px;
+  color: var(--wa-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wa-header-subtitle.online {
+  color: var(--wa-teal);
+  font-weight: 600;
+}
+
+.wa-header-subtitle.typing {
+  color: var(--wa-teal);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.wa-chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--wa-text-secondary);
+}
+
+/* Chat Stream Container with WhatsApp Doodle BG */
+.wa-message-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+
+/* Date Pill */
+.wa-date-separator {
+  align-self: center;
+  background-color: var(--wa-date-pill);
+  color: var(--wa-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  margin: 6px 0;
+  user-select: none;
+  text-transform: uppercase;
+}
+
+/* Message Bubble */
+.wa-msg-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  position: relative;
+  animation: popIn 0.15s ease-out;
+}
+
+.wa-msg-row.outgoing {
+  align-items: flex-end;
+}
+
+.wa-msg-row.incoming {
+  align-items: flex-start;
+}
+
+.wa-bubble {
+  max-width: 82%;
+  padding: 6px 9px 5px 10px;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  word-break: break-word;
+  cursor: pointer;
+  border: 1px solid var(--wa-bubble-border);
+}
+
+.wa-bubble.outgoing {
+  background-color: var(--wa-outgoing);
+  color: var(--wa-text-primary);
+  border-radius: 8px 8px 0px 8px; /* Tail bottom-right */
+}
+
+.wa-bubble.incoming {
+  background-color: var(--wa-incoming);
+  color: var(--wa-text-primary);
+  border-radius: 8px 8px 8px 0px; /* Tail bottom-left */
+}
+
+.wa-bubble-text {
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.wa-bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-top: 2px;
+  float: right;
+  margin-left: 10px;
+  user-select: none;
+}
+
+.wa-bubble-time {
+  font-size: 10px;
+  color: rgba(233, 237, 239, 0.6);
+}
+
+.wa-tick-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.wa-tick-icon.read {
+  color: var(--wa-blue-tick);
+}
+
+.wa-tick-icon.delivered, .wa-tick-icon.sent {
+  color: var(--wa-gray-tick);
+}
+
+/* Reactions on bubble */
+.wa-reactions-badge {
+  position: absolute;
+  bottom: -10px;
+  right: 8px;
+  background-color: var(--wa-incoming);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  padding: 1px 5px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  z-index: 5;
+}
+
+.wa-msg-row.incoming .wa-reactions-badge {
+  left: 8px;
+  right: auto;
+}
+
+/* Floating Emoji Reaction Bar */
+.wa-reaction-bar {
+  position: absolute;
+  top: -42px;
+  right: 0;
+  background-color: var(--wa-header-bg);
+  border: 1px solid var(--wa-border);
+  border-radius: 24px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+  z-index: 50;
+  animation: popIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wa-msg-row.incoming .wa-reaction-bar {
+  left: 0;
+  right: auto;
+}
+
+.wa-reaction-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.wa-reaction-btn:hover {
+  transform: scale(1.3);
+}
+
+/* Simulated Voice Note Bubble */
+.wa-voice-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  width: 220px;
+}
+
+.wa-voice-play-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wa-voice-waveform {
+  flex: 1;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.wa-waveform-bar {
+  flex: 1;
+  background-color: rgba(255, 255, 255, 0.4);
+  border-radius: 1px;
+}
+
+/* Bottom Input Dock */
+.wa-input-dock {
+  background-color: transparent;
+  padding: 6px 8px 8px 8px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.wa-input-capsule {
+  flex: 1;
+  background-color: var(--wa-header-bg);
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  min-height: 46px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.wa-dock-icon {
+  background: none;
+  border: none;
+  color: var(--wa-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: color 0.15s ease;
+}
+
+.wa-dock-icon:hover {
+  color: var(--wa-text-primary);
+}
+
+.wa-message-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--wa-text-primary);
+  font-size: 15px;
+  outline: none;
+  padding: 8px 6px;
+  resize: none;
+  max-height: 120px;
+  line-height: 1.3;
+}
+
+.wa-message-textarea::placeholder {
+  color: var(--wa-text-secondary);
+}
+
+/* Circular Send / Mic Floating Button */
+.wa-send-circle-btn {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background-color: var(--wa-teal);
+  color: #111B21;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+
+.wa-send-circle-btn:hover {
+  background-color: var(--wa-teal-hover);
+  transform: scale(1.05);
+}
+
+/* Attachment Options Drawer */
+.wa-attachment-sheet {
+  position: absolute;
+  bottom: 60px;
+  left: 12px;
+  right: 12px;
+  background-color: var(--wa-header-bg);
+  border: 1px solid var(--wa-border);
+  border-radius: 16px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  z-index: 50;
+  animation: popIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wa-attach-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.wa-attach-circle {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  transition: transform 0.15s ease;
+}
+
+.wa-attach-item:hover .wa-attach-circle {
+  transform: scale(1.08);
+}
+
+.wa-attach-label {
+  font-size: 11px;
+  color: var(--wa-text-secondary);
+  font-weight: 500;
+}
+
+/* New Chat Dialog Modal */
+.wa-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(11, 20, 26, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+  animation: popIn 0.15s ease-out;
+}
+
+.wa-modal-box {
+  width: 100%;
+  max-width: 360px;
+  background-color: var(--wa-header-bg);
+  border: 1px solid var(--wa-border);
+  border-radius: 20px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+}
+
+.wa-modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--wa-text-primary);
+}
+
+.wa-user-results-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wa-search-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.wa-search-user-row:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}

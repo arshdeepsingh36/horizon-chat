@@ -1,0 +1,14 @@
+<resources>
+    <!-- Base application theme with Sunset Glow & Twilight Ocean styling -->
+    <style name="Theme.HorizonChat" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/accent_amber</item>
+        <item name="colorPrimaryVariant">@color/surface</item>
+        <item name="colorOnPrimary">@color/bg_base</item>
+        <item name="colorSecondary">@color/bubble_sent</item>
+        <item name="colorSecondaryVariant">@color/accent_glow</item>
+        <item name="colorOnSecondary">@color/text_primary</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:windowBackground">@color/bg_base</item>
+    </style>
+</resources>

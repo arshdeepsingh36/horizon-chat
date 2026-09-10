@@ -1,0 +1,652 @@
+/* Horizon Chat: Sunset Glow & Twilight Ocean Styles */
+
+.horizon-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.horizon-phone-chassis {
+  width: 100%;
+  height: 100%;
+  max-width: 440px;
+  max-height: 900px;
+  background-color: var(--color-bg-base);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(245, 158, 11, 0.15);
+}
+
+@media (min-width: 500px) {
+  .horizon-phone-chassis {
+    height: 94vh;
+    border-radius: 36px;
+    border: 8px solid #162238;
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(245, 158, 11, 0.25);
+  }
+}
+
+@media (max-width: 499px) {
+  .horizon-phone-chassis {
+    border: none;
+    border-radius: 0;
+    max-width: 100%;
+    height: 100%;
+  }
+}
+
+/* Android Status Bar */
+.horizon-status-bar {
+  height: 28px;
+  background-color: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  user-select: none;
+  z-index: 50;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.horizon-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-primary);
+}
+
+.horizon-status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Cold Start Non-blocking Top Banner */
+.horizon-cold-banner {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+  color: #FDE68A;
+  padding: 6px 14px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 40;
+  animation: fadeIn 0.2s ease;
+}
+
+/* Mode Switcher */
+.horizon-mode-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background-color: rgba(22, 34, 56, 0.85);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+}
+
+.horizon-mode-toggle:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent-amber);
+}
+
+/* ======================================================== */
+/* 1. AUTH SCREEN (activity_login.xml)                      */
+/* ======================================================== */
+.horizon-auth-view {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 32px 24px;
+  background-color: var(--color-bg-base);
+  animation: fadeIn 0.25s ease;
+}
+
+.horizon-auth-top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.sunset-bulb-icon {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #F59E0B 0%, #EA580C 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0E1626;
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.45);
+}
+
+.horizon-auth-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-top: 4px;
+}
+
+.horizon-auth-subtitle {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.horizon-auth-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: auto 0;
+}
+
+.horizon-input-field {
+  width: 100%;
+  height: 52px;
+  background-color: var(--color-surface);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 0 16px;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.horizon-input-field:focus {
+  border-color: var(--color-accent-amber);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.horizon-input-field::placeholder {
+  color: var(--color-text-muted);
+}
+
+.horizon-btn-primary {
+  width: 100%;
+  height: 54px;
+  background-color: var(--color-accent-amber);
+  color: #0E1626;
+  font-weight: 700;
+  font-size: 15px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background-color 0.2s, transform 0.1s;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
+}
+
+.horizon-btn-primary:hover {
+  background-color: #D97706;
+  transform: translateY(-1px);
+}
+
+.horizon-toggle-link {
+  background: none;
+  border: none;
+  color: var(--color-accent-amber);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.horizon-error-banner {
+  background-color: rgba(239, 68, 68, 0.15);
+  border: 1px solid #EF4444;
+  color: #FCA5A5;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+/* ======================================================== */
+/* 2. CONVERSATION LIST (activity_chat_list.xml)            */
+/* ======================================================== */
+.horizon-chat-list-view {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-base);
+  position: relative;
+  overflow: hidden;
+}
+
+.horizon-toolbar {
+  height: 56px;
+  background-color: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.horizon-toolbar-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.horizon-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--color-text-muted);
+}
+
+.horizon-chat-recycler {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.horizon-chat-cell {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  gap: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: background-color 0.15s ease;
+}
+
+.horizon-chat-cell:hover {
+  background-color: var(--color-surface);
+}
+
+.horizon-cell-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1E293B, #24334D);
+  border: 2px solid rgba(245, 158, 11, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-primary);
+  font-weight: 700;
+  font-size: 18px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.horizon-cell-avatar.online::after {
+  content: '';
+  position: absolute;
+  bottom: 0px;
+  right: 0px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--color-accent-amber);
+  border: 2px solid var(--color-bg-base);
+}
+
+.horizon-cell-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.horizon-cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.horizon-cell-username {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.horizon-cell-time {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.horizon-cell-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.horizon-cell-snippet {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.horizon-fab {
+  position: absolute;
+  bottom: 24px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: var(--color-accent-amber);
+  color: #0E1626;
+  border: none;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+  z-index: 30;
+}
+
+.horizon-fab:hover {
+  transform: scale(1.06);
+  background-color: #D97706;
+}
+
+/* ======================================================== */
+/* 3. DIRECT CHAT ROOM (activity_chat.xml)                  */
+/* ======================================================== */
+.horizon-direct-view {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-base);
+  position: relative;
+  overflow: hidden;
+  animation: fadeIn 0.2s ease;
+}
+
+.horizon-chat-toolbar {
+  height: 58px;
+  background-color: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  flex-shrink: 0;
+  z-index: 20;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.horizon-partner-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.horizon-presence-badge {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.horizon-presence-badge.online {
+  color: var(--color-accent-amber);
+}
+
+.horizon-presence-badge.offline {
+  color: var(--color-text-muted);
+}
+
+/* Message Canvas */
+.horizon-message-canvas {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.horizon-msg-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.horizon-msg-row.outgoing {
+  align-items: flex-end;
+}
+
+.horizon-msg-row.incoming {
+  align-items: flex-start;
+}
+
+/* Asymmetric Bubbles (PRD Section 5 Constraints: max-width 260px) */
+.horizon-bubble {
+  max-width: 260px;
+  padding: 8px 12px 6px 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  word-break: break-word;
+  line-height: 1.4;
+  position: relative;
+}
+
+.horizon-bubble.outgoing {
+  background-color: var(--color-bubble-sent); /* #EA580C */
+  color: var(--color-text-primary);
+  border-radius: 14px 14px 2px 14px; /* Bottom-right radius 2dp */
+}
+
+.horizon-bubble.incoming {
+  background-color: var(--color-bubble-received); /* #24334D */
+  color: var(--color-text-primary);
+  border-radius: 14px 14px 14px 2px; /* Bottom-left radius 2dp */
+}
+
+.horizon-bubble-text {
+  font-size: 15px;
+  white-space: pre-wrap;
+}
+
+.horizon-bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.horizon-bubble.outgoing .horizon-bubble-meta {
+  color: #FED7AA;
+}
+
+.horizon-bubble.incoming .horizon-bubble-meta {
+  color: var(--color-text-muted);
+}
+
+/* Tick Colors */
+.horizon-tick {
+  display: inline-flex;
+  align-items: center;
+}
+
+.horizon-tick.read {
+  color: var(--color-ticks-read); /* #FDE68A */
+}
+
+.horizon-tick.delivered, .horizon-tick.sent {
+  color: var(--color-ticks-sent); /* #CBD5E1 */
+}
+
+/* 4. Media & Micro-Blur Thumbnail Card (item_chat_sent_media.xml) */
+.horizon-media-card {
+  width: 240px;
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.horizon-blur-container {
+  width: 100%;
+  height: 180px;
+  position: relative;
+  overflow: hidden;
+  background-color: #121B2B;
+}
+
+.horizon-blur-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(8px);
+  transform: scale(1.08);
+}
+
+.horizon-blur-img.revealed {
+  filter: none;
+  transform: scale(1);
+  transition: filter 0.3s ease, transform 0.3s ease;
+}
+
+.horizon-download-scrim {
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-overlay-blur);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  gap: 4px;
+  transition: opacity 0.2s;
+}
+
+.horizon-download-scrim:hover {
+  background-color: rgba(14, 22, 38, 0.8);
+}
+
+.horizon-download-glyph {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-primary);
+}
+
+.horizon-file-size {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* Horizontal Input Dock (activity_chat.xml) */
+.horizon-input-dock {
+  background-color: var(--color-surface);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.horizon-dock-clip {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.horizon-dock-clip:hover {
+  color: var(--color-accent-amber);
+}
+
+.horizon-input-box {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  outline: none;
+  padding: 6px 8px;
+}
+
+.horizon-input-box::placeholder {
+  color: var(--color-text-muted);
+}
+
+.horizon-send-fab {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background-color: var(--color-accent-amber);
+  color: #0E1626;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.horizon-send-fab:hover {
+  transform: scale(1.05);
+}
+
+/* Soft Navigation Gesture Bar */
+.horizon-nav-bar {
+  height: 20px;
+  background-color: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.horizon-nav-pill {
+  width: 72px;
+  height: 4px;
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+}

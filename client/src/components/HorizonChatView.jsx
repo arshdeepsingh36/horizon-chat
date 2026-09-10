@@ -1,0 +1,550 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  ArrowLeft,
+  Paperclip,
+  Send,
+  Check,
+  CheckCheck,
+  Download,
+  Loader2,
+  Image as ImageIcon,
+  Clock
+} from 'lucide-react';
+
+// Helper to normalize message objects across snake_case and camelCase
+function normalizeMsg(m) {
+  if (!m) return null;
+  const id = Number(m.id);
+  const senderId = Number(m.senderId ?? m.sender_id);
+  const recipientId = Number(m.recipientId ?? m.recipient_id);
+  const text = m.text ?? m.message_text ?? m.messageText ?? '';
+  const attachmentType = m.attachmentType ?? m.attachment_type ?? 'NONE';
+  const attachmentUrl = m.attachmentUrl ?? m.attachment_url ?? null;
+  const thumbnailBlur = m.thumbnailBlur ?? m.thumbnail_blur ?? null;
+  const fileSizeBytes = Number(m.fileSizeBytes ?? m.file_size_bytes ?? 0);
+  const status = m.status || 'SENT';
+  const createdAt = m.createdAt ?? m.created_at ?? new Date().toISOString();
+  const pending = Boolean(m.pending);
+
+  return {
+    id,
+    senderId,
+    recipientId,
+    text,
+    attachmentType,
+    attachmentUrl,
+    thumbnailBlur,
+    fileSizeBytes,
+    status,
+    createdAt,
+    pending
+  };
+}
+
+export default function HorizonChatView({
+  user,
+  partner, // { id, username, online }
+  socket,
+  apiBaseUrl,
+  token,
+  onBack,
+  onMessageSent
+}) {
+  const [messages, setMessages] = useState([]);
+  const [inputText, setInputText] = useState('');
+  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [downloadedMedia, setDownloadedMedia] = useState({}); // { [messageId]: boolean }
+  const [downloadingMedia, setDownloadingMedia] = useState({}); // { [messageId]: boolean }
+  const [isPartnerOnline, setIsPartnerOnline] = useState(partner?.online || false);
+
+  const canvasRef = useRef(null);
+  const isFirstLoadRef = useRef(true);
+
+  // 1. Initial Load: Strictly 25 messages (TRD Section 3.3 & Rules Section 3)
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialMessages() {
+      setLoadingInitial(true);
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/messages/${partner.id}?limit=25`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (isMounted && Array.isArray(data)) {
+          const normalized = data.map(normalizeMsg).filter(Boolean);
+          setMessages(normalized);
+          setHasMoreOlder(normalized.length >= 25);
+
+          // Mark incoming unread messages as read
+          normalized.forEach((msg) => {
+            if (msg.senderId === partner.id && msg.status !== 'READ' && socket) {
+              socket.emit('mark_read', { messageId: msg.id, senderId: msg.senderId });
+            }
+          });
+        }
+      } catch (err) {
+        console.error('[LOAD INITIAL MESSAGES ERROR]', err);
+      } finally {
+        if (isMounted) setLoadingInitial(false);
+      }
+    }
+
+    if (partner?.id) {
+      loadInitialMessages();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [partner.id, token, apiBaseUrl, socket]);
+
+  // Auto-scroll to bottom on first load and new outgoing messages
+  useEffect(() => {
+    if (loadingInitial) return;
+    if (isFirstLoadRef.current) {
+      if (canvasRef.current) {
+        canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
+      }
+      isFirstLoadRef.current = false;
+    }
+  }, [loadingInitial, messages.length]);
+
+  // 2. Socket Listeners for Real-Time Messages and Read Receipts
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = (rawMsg) => {
+      const msg = normalizeMsg(rawMsg);
+      if (!msg) return;
+
+      // Check if this message belongs to the current open conversation
+      if (msg.senderId === partner.id) {
+        setMessages((prev) => {
+          // Guard against duplicates
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+
+        // Auto-mark as read since chat is currently open
+        socket.emit('mark_read', { messageId: msg.id, senderId: msg.senderId });
+
+        // Scroll down smoothly
+        setTimeout(() => {
+          if (canvasRef.current) {
+            canvasRef.current.scrollTo({
+              top: canvasRef.current.scrollHeight,
+              behavior: 'smooth'
+            });
+          }
+        }, 50);
+      }
+    };
+
+    const handleReadAck = ({ messageId }) => {
+      const targetId = Number(messageId);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === targetId ? { ...m, status: 'READ' } : m))
+      );
+    };
+
+    const handleStatusChanged = ({ userId, status }) => {
+      if (Number(userId) === Number(partner.id)) {
+        setIsPartnerOnline(status === 'online');
+      }
+    };
+
+    socket.on('new_message', handleNewMessage);
+    socket.on('message_read_ack', handleReadAck);
+    socket.on('user_status_changed', handleStatusChanged);
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('message_read_ack', handleReadAck);
+      socket.off('user_status_changed', handleStatusChanged);
+    };
+  }, [socket, partner.id]);
+
+  // 3. Reverse Cursor Pagination: Fetch older messages when scrolling to top
+  const handleScroll = async (e) => {
+    const el = e.target;
+    if (el.scrollTop < 30 && !loadingOlder && hasMoreOlder && messages.length > 0) {
+      const oldestId = messages[0].id;
+      setLoadingOlder(true);
+
+      const prevScrollHeight = el.scrollHeight;
+      const prevScrollTop = el.scrollTop;
+
+      try {
+        const res = await fetch(
+          `${apiBaseUrl}/api/messages/${partner.id}?cursor=${oldestId}&limit=25`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const olderBatch = await res.json();
+
+        if (Array.isArray(olderBatch)) {
+          const normalized = olderBatch.map(normalizeMsg).filter(Boolean);
+          if (normalized.length < 25) {
+            setHasMoreOlder(false);
+          }
+          if (normalized.length > 0) {
+            setMessages((prev) => [...normalized, ...prev]);
+
+            // Preserve scroll position so view doesn't jump
+            requestAnimationFrame(() => {
+              const heightDiff = el.scrollHeight - prevScrollHeight;
+              el.scrollTop = prevScrollTop + heightDiff;
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[LOAD OLDER MESSAGES ERROR]', err);
+      } finally {
+        setLoadingOlder(false);
+      }
+    }
+  };
+
+  // 4. Send Text Message
+  const handleSendMessage = (e) => {
+    e?.preventDefault();
+    const text = inputText.trim();
+    if (!text || !socket) return;
+
+    setInputText('');
+
+    const optimisticId = Date.now();
+    const optimisticMsg = {
+      id: optimisticId,
+      senderId: Number(user.id),
+      recipientId: Number(partner.id),
+      text,
+      attachmentType: 'NONE',
+      attachmentUrl: null,
+      thumbnailBlur: null,
+      fileSizeBytes: 0,
+      status: isPartnerOnline ? 'DELIVERED' : 'SENT',
+      createdAt: new Date().toISOString(),
+      pending: true
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+
+    // Scroll to bottom
+    setTimeout(() => {
+      if (canvasRef.current) {
+        canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
+      }
+    }, 20);
+
+    // Socket emit with ACK callback
+    socket.emit(
+      'send_message',
+      {
+        recipientId: partner.id,
+        text,
+        attachmentType: 'NONE'
+      },
+      (response) => {
+        if (response?.success && response.message) {
+          const saved = normalizeMsg(response.message);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === optimisticId ? saved : m))
+          );
+          if (onMessageSent) onMessageSent();
+        }
+      }
+    );
+  };
+
+  // 5. Send Media with 20x20 Micro-Preview
+  const handleSendMediaSample = async () => {
+    if (!socket) return;
+
+    try {
+      // Request micro-preview generation from server endpoint (TRD Section 3.5)
+      const res = await fetch(`${apiBaseUrl}/api/media/upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          attachmentUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80',
+          fileSizeBytes: 2457812
+        })
+      });
+      const mediaData = await res.json();
+
+      const optimisticId = Date.now();
+      const optimisticMsg = {
+        id: optimisticId,
+        senderId: Number(user.id),
+        recipientId: Number(partner.id),
+        text: 'Sunset Horizon View',
+        attachmentType: 'IMAGE',
+        attachmentUrl: mediaData.attachmentUrl,
+        thumbnailBlur: mediaData.thumbnailBlur,
+        fileSizeBytes: mediaData.fileSizeBytes,
+        status: isPartnerOnline ? 'DELIVERED' : 'SENT',
+        createdAt: new Date().toISOString()
+      };
+
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setTimeout(() => {
+        if (canvasRef.current) canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
+      }, 20);
+
+      socket.emit(
+        'send_message',
+        {
+          recipientId: partner.id,
+          text: 'Sunset Horizon View',
+          attachmentType: 'IMAGE',
+          attachmentUrl: mediaData.attachmentUrl,
+          thumbnailBlur: mediaData.thumbnailBlur,
+          fileSizeBytes: mediaData.fileSizeBytes
+        },
+        (response) => {
+          if (response?.success && response.message) {
+            const saved = normalizeMsg(response.message);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === optimisticId ? saved : m))
+            );
+            if (onMessageSent) onMessageSent();
+          }
+        }
+      );
+    } catch (err) {
+      console.error('[SEND MEDIA ERROR]', err);
+    }
+  };
+
+  // 6. Tap-to-Download Media Handler (Rules Section 3: Blurhash/Micro-Preview mandatory)
+  const handleDownloadMedia = (messageId) => {
+    setDownloadingMedia((prev) => ({ ...prev, [messageId]: true }));
+    setTimeout(() => {
+      setDownloadingMedia((prev) => ({ ...prev, [messageId]: false }));
+      setDownloadedMedia((prev) => ({ ...prev, [messageId]: true }));
+    }, 1200);
+  };
+
+  const formatMessageTime = (ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '1.8 MB';
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="horizon-direct-view">
+      {/* Top App Bar (activity_chat.xml) */}
+      <div className="horizon-chat-toolbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={onBack}
+            className="horizon-dock-clip"
+            id="btnBack"
+            title="Back to conversations"
+          >
+            <ArrowLeft size={20} />
+          </button>
+
+          <div className="horizon-partner-info">
+            <div
+              className={`horizon-cell-avatar ${isPartnerOnline ? 'online' : ''}`}
+              style={{ width: '38px', height: '38px', fontSize: '14px' }}
+            >
+              {(partner.username || 'User').slice(0, 2).toUpperCase()}
+            </div>
+
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                @{partner.username}
+              </div>
+              <div className={`horizon-presence-badge ${isPartnerOnline ? 'online' : 'offline'}`}>
+                {isPartnerOnline ? 'online' : 'offline'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Message Canvas (Reverse Cursor Scrollable) */}
+      <div
+        className="horizon-message-canvas"
+        ref={canvasRef}
+        onScroll={handleScroll}
+        id="recyclerMessages"
+      >
+        {/* Loading Older Banner */}
+        {loadingOlder && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '6px' }}>
+            <Loader2 size={16} color="var(--color-accent-amber)" style={{ animation: 'spin 1s linear infinite' }} />
+          </div>
+        )}
+
+        {!hasMoreOlder && messages.length > 0 && (
+          <div style={{ textAlign: 'center', padding: '8px 0', fontSize: '11px', color: 'var(--color-text-muted)' }}>
+            Beginning of cloud conversation
+          </div>
+        )}
+
+        {loadingInitial ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Loader2 size={24} color="var(--color-accent-amber)" style={{ animation: 'spin 1s linear infinite' }} />
+          </div>
+        ) : messages.length === 0 ? (
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              color: 'var(--color-text-muted)',
+              padding: '24px'
+            }}
+          >
+            <div
+              style={{
+                width: '50px',
+                height: '50px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--color-surface)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '12px',
+                color: 'var(--color-accent-amber)'
+              }}
+            >
+              <ImageIcon size={22} />
+            </div>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-primary)', fontWeight: 600 }}>
+              Say hello to @{partner.username}!
+            </p>
+            <p style={{ fontSize: '12px', marginTop: '4px' }}>
+              Your messages sync seamlessly across all sessions.
+            </p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isMe = Number(msg.senderId) === Number(user.id);
+            const isMedia = msg.attachmentType === 'IMAGE' || Boolean(msg.thumbnailBlur);
+            const isDownloaded = downloadedMedia[msg.id] || false;
+            const isDownloading = downloadingMedia[msg.id] || false;
+
+            return (
+              <div key={msg.id} className={`horizon-msg-row ${isMe ? 'outgoing' : 'incoming'}`}>
+                <div className={`horizon-bubble ${isMe ? 'outgoing' : 'incoming'}`}>
+                  {/* Media / Micro-Preview Card (Rules Section 3 & TRD Section 5.3) */}
+                  {isMedia && (
+                    <div className="horizon-media-card" style={{ marginBottom: '6px' }}>
+                      <div className="horizon-blur-container">
+                        <img
+                          src={isDownloaded ? msg.attachmentUrl : msg.thumbnailBlur}
+                          alt="Attachment micro-preview"
+                          className={`horizon-blur-img ${isDownloaded ? 'revealed' : ''}`}
+                        />
+
+                        {/* Scrim with tap-to-download */}
+                        {!isDownloaded && (
+                          <div
+                            className="horizon-download-scrim"
+                            onClick={() => !isDownloading && handleDownloadMedia(msg.id)}
+                            title="Tap to download media"
+                          >
+                            {isDownloading ? (
+                              <Loader2 size={24} color="var(--color-accent-amber)" style={{ animation: 'spin 1s linear infinite' }} />
+                            ) : (
+                              <>
+                                <div className="horizon-download-glyph">
+                                  <Download size={18} />
+                                </div>
+                                <span className="horizon-file-size">
+                                  {formatFileSize(msg.fileSizeBytes)}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Message Text */}
+                  {msg.text ? (
+                    <div className="horizon-bubble-text">{msg.text}</div>
+                  ) : !isMedia ? (
+                    <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.7 }}>
+                      (Empty message)
+                    </div>
+                  ) : null}
+
+                  {/* Metadata (Timestamp + Status Ticks) */}
+                  <div className="horizon-bubble-meta">
+                    <span>{formatMessageTime(msg.createdAt)}</span>
+
+                    {isMe && (
+                      <span className={`horizon-tick ${msg.status === 'READ' ? 'read' : 'sent'}`}>
+                        {msg.pending ? (
+                          <Clock size={12} />
+                        ) : msg.status === 'SENT' ? (
+                          <Check size={13} />
+                        ) : (
+                          <CheckCheck size={13} />
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Horizontal Input Dock (activity_chat.xml) */}
+      <form onSubmit={handleSendMessage} className="horizon-input-dock">
+        <button
+          type="button"
+          onClick={handleSendMediaSample}
+          className="horizon-dock-clip"
+          title="Send Sunset Image (20x20 Micro-Preview)"
+          id="btnAttachMedia"
+        >
+          <Paperclip size={20} />
+        </button>
+
+        <input
+          id="etMessageInput"
+          type="text"
+          className="horizon-input-box"
+          placeholder="Message..."
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          autoComplete="off"
+        />
+
+        <button
+          type="submit"
+          disabled={!inputText.trim()}
+          className="horizon-send-fab"
+          id="btnSendMessage"
+          title="Send"
+        >
+          <Send size={18} style={{ marginLeft: '2px' }} />
+        </button>
+      </form>
+    </div>
+  );
+}
