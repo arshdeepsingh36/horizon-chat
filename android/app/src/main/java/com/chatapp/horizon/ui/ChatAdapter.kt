@@ -21,6 +21,7 @@ import com.chatapp.horizon.databinding.ItemChatVoiceBinding
 import com.chatapp.horizon.databinding.ItemMessageReceivedBinding
 import com.chatapp.horizon.databinding.ItemMessageSentBinding
 import com.chatapp.horizon.models.ChatMessage
+import com.chatapp.horizon.network.ApiClient
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
