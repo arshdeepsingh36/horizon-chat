@@ -25,6 +25,10 @@ import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -283,16 +287,16 @@ class ChatAdapter(
         // 4. Remote HTTP/HTTPS Audio: Download to cache in background, then play
         Thread {
             try {
-                val url = URL(audioUrl)
-                val connection = url.openConnection() as HttpURLConnection
+                val netUrl = URL(audioUrl)
+                val connection = netUrl.openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
                 connection.readTimeout = 15000
                 connection.instanceFollowRedirects = true
 
                 if (connection.responseCode in 200..299) {
                     val tempDownload = File(voiceDir, "dl_tmp_${msg.id}_${System.currentTimeMillis()}.m4a")
-                    connection.inputStream.use { input ->
-                        tempDownload.outputStream().use { output ->
+                    connection.inputStream.use { input: InputStream ->
+                        tempDownload.outputStream().use { output: OutputStream ->
                             input.copyTo(output)
                         }
                     }
