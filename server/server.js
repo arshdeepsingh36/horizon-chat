@@ -365,19 +365,27 @@ app.post('/api/media/upload', authenticateToken, async (req, res) => {
     const defaultThumbnailBlur = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAMklEQVR42mNk+M9Qz0AEYCJVE6OaRjWNahrVNKppVNOoplFNo5pGNY1qGtU0qmlU06iSAQBvGQ4RFy5yRwAAAABJRU5ErkJggg==';
 
     if (imageBase64 && typeof imageBase64 === 'string') {
-      const matches = imageBase64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      const matches = imageBase64.match(/^data:([A-Za-z0-9\-\+\.\/]+);base64,(.+)$/s);
       let buffer;
       let ext = 'jpg';
       if (matches && matches.length === 3) {
-        const mime = matches[1];
+        const mime = matches[1].toLowerCase();
         if (mime.includes('png')) ext = 'png';
         else if (mime.includes('webp')) ext = 'webp';
+        else if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+        else if (mime.includes('ogg')) ext = 'ogg';
+        else if (mime.includes('webm')) ext = 'webm';
+        else if (mime.includes('wav')) ext = 'wav';
         buffer = Buffer.from(matches[2], 'base64');
       } else {
-        buffer = Buffer.from(imageBase64, 'base64');
+        const cleanBase64 = imageBase64.includes('base64,') ? imageBase64.split('base64,')[1] : imageBase64;
+        buffer = Buffer.from(cleanBase64, 'base64');
+        if (fileName && fileName.includes('.')) {
+          ext = fileName.split('.').pop();
+        }
       }
 
-      const cleanFileName = fileName ? fileName.replace(/[^a-zA-Z0-9._-]/g, '_') : `img_${Date.now()}.${ext}`;
+      const cleanFileName = fileName ? fileName.replace(/[^a-zA-Z0-9._-]/g, '_') : `file_${Date.now()}.${ext}`;
       const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${cleanFileName}`;
       const filePath = path.join(uploadsDir, uniqueName);
       fs.writeFileSync(filePath, buffer);
@@ -454,24 +462,34 @@ io.on('connection', (socket) => {
     const recipientOnline = isUserOnline(rId);
     const initialStatus = recipientOnline ? 'DELIVERED' : 'SENT';
 
-    // Auto-save direct Base64 Data URL to uploads directory
+    // Auto-save direct Base64 Data URL to uploads directory (Images and Audio)
     let finalAttachmentUrl = attachmentUrl;
-    if (attachmentUrl && typeof attachmentUrl === 'string' && attachmentUrl.startsWith('data:image/')) {
+    if (attachmentUrl && typeof attachmentUrl === 'string' && (attachmentUrl.startsWith('data:image/') || attachmentUrl.startsWith('data:audio/'))) {
       try {
-        const matches = attachmentUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        const isAudio = attachmentUrl.startsWith('data:audio/');
+        const matches = attachmentUrl.match(/^data:([A-Za-z0-9\-\+\.\/]+);base64,(.+)$/s);
+        let ext = isAudio ? 'm4a' : 'jpg';
+        let buf;
         if (matches && matches.length === 3) {
-          const mime = matches[1];
-          let ext = 'jpg';
+          const mime = matches[1].toLowerCase();
           if (mime.includes('png')) ext = 'png';
           else if (mime.includes('webp')) ext = 'webp';
-          const buf = Buffer.from(matches[2], 'base64');
-          const uniqueName = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-          fs.writeFileSync(path.join(uploadsDir, uniqueName), buf);
-          const serverHost = process.env.RENDER_EXTERNAL_URL || 'https://horizon-chat-1.onrender.com';
-          finalAttachmentUrl = `${serverHost}/uploads/${uniqueName}`;
+          else if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+          else if (mime.includes('ogg')) ext = 'ogg';
+          else if (mime.includes('webm')) ext = 'webm';
+          else if (mime.includes('wav')) ext = 'wav';
+          buf = Buffer.from(matches[2], 'base64');
+        } else {
+          const cleanBase64 = attachmentUrl.includes('base64,') ? attachmentUrl.split('base64,')[1] : attachmentUrl;
+          buf = Buffer.from(cleanBase64, 'base64');
         }
+        const prefix = isAudio ? 'voice' : 'img';
+        const uniqueName = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+        fs.writeFileSync(path.join(uploadsDir, uniqueName), buf);
+        const serverHost = process.env.RENDER_EXTERNAL_URL || 'https://horizon-chat-1.onrender.com';
+        finalAttachmentUrl = `${serverHost}/uploads/${uniqueName}`;
       } catch (err) {
-        console.error('[SOCKET IMAGE AUTO-SAVE ERROR]', err);
+        console.error('[SOCKET MEDIA AUTO-SAVE ERROR]', err);
       }
     }
 

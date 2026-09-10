@@ -210,48 +210,123 @@ class ChatAdapter(
         holderBinding.btnPlayPause.setImageResource(R.drawable.ic_pause_circle)
         holderBinding.pbAudioProgress.progress = 0
 
-        try {
-            val player = MediaPlayer()
-            activeMediaPlayer = player
+        val voiceDir = File(context.cacheDir, "voice_cache").apply { mkdirs() }
+        val localCacheFile = File(voiceDir, "voice_${msg.id}.m4a")
 
-            if (audioUrl.startsWith("data:audio/")) {
-                val cleanBase64 = audioUrl.substringAfter("base64,")
-                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-                val tempFile = File(context.cacheDir, "voice_play_${msg.id}.m4a")
-                tempFile.writeBytes(decodedBytes)
-                player.setDataSource(tempFile.absolutePath)
-            } else {
-                player.setDataSource(audioUrl)
-            }
-
-            player.setOnPreparedListener { mp ->
-                mp.start()
-                startProgressUpdater(holderBinding)
-            }
-            player.setOnCompletionListener {
-                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
-                holderBinding.pbAudioProgress.progress = 0
-                val finishedId = activePlayingMsgId
-                releaseMediaPlayer()
-                if (finishedId != null) {
-                    val idx = messages.indexOfFirst { it.id == finishedId }
-                    if (idx != -1) notifyItemChanged(idx)
+        fun playFromLocalFile(file: File) {
+            try {
+                val player = MediaPlayer()
+                activeMediaPlayer = player
+                player.setDataSource(file.absolutePath)
+                player.setOnPreparedListener { mp ->
+                    mp.start()
+                    startProgressUpdater(holderBinding)
                 }
-            }
-            player.setOnErrorListener { _, _, _ ->
-                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
-                holderBinding.pbAudioProgress.progress = 0
+                player.setOnCompletionListener {
+                    holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                    holderBinding.pbAudioProgress.progress = 0
+                    val finishedId = activePlayingMsgId
+                    releaseMediaPlayer()
+                    if (finishedId != null) {
+                        val idx = messages.indexOfFirst { it.id == finishedId }
+                        if (idx != -1) notifyItemChanged(idx)
+                    }
+                }
+                player.setOnErrorListener { _, _, _ ->
+                    holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                    holderBinding.pbAudioProgress.progress = 0
+                    releaseMediaPlayer()
+                    Toast.makeText(context, "Unable to play audio format", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                player.prepareAsync()
+            } catch (e: Exception) {
+                e.printStackTrace()
                 releaseMediaPlayer()
-                Toast.makeText(context, "Failed to stream voice note", Toast.LENGTH_SHORT).show()
-                true
+                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                Toast.makeText(context, "Error playing audio: ${e.message}", Toast.LENGTH_SHORT).show()
             }
-            player.prepareAsync()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        }
+
+        val mainHandler = Handler(Looper.getMainLooper())
+
+        // 1. Data URL (Base64)
+        if (audioUrl.startsWith("data:audio/")) {
+            try {
+                val cleanBase64 = if (audioUrl.contains("base64,")) audioUrl.substringAfter("base64,") else audioUrl
+                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                localCacheFile.writeBytes(decodedBytes)
+                playFromLocalFile(localCacheFile)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                releaseMediaPlayer()
+                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                Toast.makeText(context, "Invalid audio encoding", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        // 2. Pre-cached file exists and is valid
+        if (localCacheFile.exists() && localCacheFile.length() > 50) {
+            playFromLocalFile(localCacheFile)
+            return
+        }
+
+        // 3. Mock CDN URL handling
+        if (audioUrl.contains("cdn.horizonchat.io")) {
             releaseMediaPlayer()
             holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
-            Toast.makeText(context, "Error playing audio: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Mock voice note from Phase 1 demo", Toast.LENGTH_SHORT).show()
+            return
         }
+
+        // 4. Remote HTTP/HTTPS Audio: Download to cache in background, then play
+        Thread {
+            try {
+                val url = URL(audioUrl)
+                val connection = url.openConnection() as HttpURLConnection
+                connection.connectTimeout = 10000
+                connection.readTimeout = 15000
+                connection.instanceFollowRedirects = true
+
+                if (connection.responseCode in 200..299) {
+                    val tempDownload = File(voiceDir, "dl_tmp_${msg.id}_${System.currentTimeMillis()}.m4a")
+                    connection.inputStream.use { input ->
+                        tempDownload.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    if (tempDownload.exists() && tempDownload.length() > 50) {
+                        tempDownload.renameTo(localCacheFile)
+                    }
+
+                    mainHandler.post {
+                        if (activePlayingMsgId == msg.id) {
+                            if (localCacheFile.exists() && localCacheFile.length() > 50) {
+                                playFromLocalFile(localCacheFile)
+                            } else {
+                                releaseMediaPlayer()
+                                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                                Toast.makeText(context, "Downloaded audio file is empty", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } else {
+                    mainHandler.post {
+                        releaseMediaPlayer()
+                        holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                        Toast.makeText(context, "Audio file not found on server (${connection.responseCode})", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                mainHandler.post {
+                    releaseMediaPlayer()
+                    holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                    Toast.makeText(context, "Failed to download voice note", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
 
     private fun startProgressUpdater(holderBinding: ItemChatVoiceBinding) {

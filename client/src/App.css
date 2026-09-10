@@ -650,3 +650,73 @@
   background-color: rgba(255, 255, 255, 0.25);
   border-radius: 999px;
 }
+
+/* Voice Note Audio Card (item_chat_voice.xml match) */
+.horizon-voice-note-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+  padding: 6px 4px;
+}
+
+.horizon-voice-play-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background-color: var(--color-surface-elevated);
+  color: var(--color-accent-amber);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, background-color 0.2s;
+  flex-shrink: 0;
+}
+
+.horizon-bubble.outgoing .horizon-voice-play-btn {
+  background-color: rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+
+.horizon-voice-play-btn:hover {
+  transform: scale(1.06);
+}
+
+.horizon-voice-track {
+  flex: 1;
+  height: 4px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.horizon-voice-progress {
+  height: 100%;
+  background-color: var(--color-accent-amber);
+  border-radius: 2px;
+  transition: width 0.1s linear;
+}
+
+.horizon-bubble.outgoing .horizon-voice-progress {
+  background-color: #ffffff;
+}
+
+.horizon-voice-duration {
+  font-size: 11px;
+  font-family: monospace;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.horizon-voice-mic {
+  opacity: 0.7;
+  color: var(--color-accent-amber);
+  flex-shrink: 0;
+}
+
+.horizon-bubble.outgoing .horizon-voice-mic {
+  color: #ffffff;
+}

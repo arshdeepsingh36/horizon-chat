@@ -472,13 +472,21 @@ class ChatActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     isViewOnceActive = false
                     updateViewOnceToggleUI()
+                    val tempId = System.currentTimeMillis()
+                    try {
+                        val voiceDir = File(cacheDir, "voice_cache").apply { mkdirs() }
+                        file.copyTo(File(voiceDir, "voice_${tempId}.m4a"), overwrite = true)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                     sendMessage(
                         text = durationText,
                         attachmentType = "AUDIO",
                         attachmentUrl = finalUrl,
                         thumbnailBlur = null,
                         fileSizeBytes = bytes.size.toLong(),
-                        isViewOnce = viewOnce
+                        isViewOnce = viewOnce,
+                        preassignedTempId = tempId
                     )
                 }
             } catch (e: Exception) {
@@ -1189,9 +1197,10 @@ class ChatActivity : AppCompatActivity() {
         attachmentUrl: String?,
         thumbnailBlur: String?,
         fileSizeBytes: Long,
-        isViewOnce: Boolean
+        isViewOnce: Boolean,
+        preassignedTempId: Long? = null
     ) {
-        val tempId = System.currentTimeMillis()
+        val tempId = preassignedTempId ?: System.currentTimeMillis()
         val optimisticMsg = ChatMessage(
             id = tempId,
             senderId = currentUserId,
@@ -1229,6 +1238,18 @@ class ChatActivity : AppCompatActivity() {
                     val serverMsg = parseJsonMessage(savedObj)
                     runOnUiThread {
                         adapter.updateOptimisticMessage(tempId, serverMsg)
+                        if (serverMsg.attachmentType == "AUDIO") {
+                            try {
+                                val voiceDir = File(cacheDir, "voice_cache")
+                                val tempFile = File(voiceDir, "voice_${tempId}.m4a")
+                                val finalFile = File(voiceDir, "voice_${serverMsg.id}.m4a")
+                                if (tempFile.exists()) {
+                                    tempFile.copyTo(finalFile, overwrite = true)
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
                     }
                 }
             }

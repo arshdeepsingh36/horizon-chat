@@ -8,7 +8,10 @@ import {
   Download,
   Loader2,
   Image as ImageIcon,
-  Clock
+  Clock,
+  Play,
+  Pause,
+  Mic
 } from 'lucide-react';
 
 // Helper to normalize message objects across snake_case and camelCase
@@ -58,9 +61,60 @@ export default function HorizonChatView({
   const [downloadedMedia, setDownloadedMedia] = useState({}); // { [messageId]: boolean }
   const [downloadingMedia, setDownloadingMedia] = useState({}); // { [messageId]: boolean }
   const [isPartnerOnline, setIsPartnerOnline] = useState(partner?.online || false);
+  const [playingVoiceId, setPlayingVoiceId] = useState(null);
+  const [voiceProgress, setVoiceProgress] = useState(0);
+  const activeAudioRef = useRef(null);
 
   const canvasRef = useRef(null);
   const isFirstLoadRef = useRef(true);
+
+  const handleToggleVoicePlay = (msgId, audioUrl) => {
+    if (!audioUrl) return;
+
+    if (playingVoiceId === msgId) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+      }
+      setPlayingVoiceId(null);
+      return;
+    }
+
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+    }
+
+    try {
+      const audio = new Audio(audioUrl);
+      activeAudioRef.current = audio;
+      setPlayingVoiceId(msgId);
+      setVoiceProgress(0);
+
+      audio.ontimeupdate = () => {
+        if (audio.duration && audio.duration > 0) {
+          setVoiceProgress((audio.currentTime / audio.duration) * 100);
+        }
+      };
+
+      audio.onended = () => {
+        setPlayingVoiceId(null);
+        setVoiceProgress(0);
+      };
+
+      audio.onerror = () => {
+        setPlayingVoiceId(null);
+        setVoiceProgress(0);
+        alert('Voice note could not be played. File may be unavailable or expired.');
+      };
+
+      audio.play().catch((err) => {
+        console.error('Audio play error:', err);
+        setPlayingVoiceId(null);
+      });
+    } catch (e) {
+      console.error(e);
+      setPlayingVoiceId(null);
+    }
+  };
 
   // 1. Initial Load: Strictly 25 messages (TRD Section 3.3 & Rules Section 3)
   useEffect(() => {
@@ -498,14 +552,40 @@ export default function HorizonChatView({
                     </div>
                   )}
 
-                  {/* Message Text */}
-                  {msg.text ? (
-                    <div className="horizon-bubble-text">{msg.text}</div>
-                  ) : !isMedia ? (
-                    <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.7 }}>
-                      (Empty message)
+                  {/* Voice Note Audio Card */}
+                  {msg.attachmentType === 'AUDIO' && (
+                    <div className="horizon-voice-note-card" style={{ marginBottom: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleVoicePlay(msg.id, msg.attachmentUrl)}
+                        className="horizon-voice-play-btn"
+                        title={playingVoiceId === msg.id ? "Pause" : "Play voice note"}
+                      >
+                        {playingVoiceId === msg.id ? <Pause size={18} /> : <Play size={18} />}
+                      </button>
+                      <div className="horizon-voice-track">
+                        <div
+                          className="horizon-voice-progress"
+                          style={{ width: `${playingVoiceId === msg.id ? voiceProgress : 0}%` }}
+                        />
+                      </div>
+                      <span className="horizon-voice-duration">
+                        {msg.text || '0:10'}
+                      </span>
+                      <Mic size={16} className="horizon-voice-mic" />
                     </div>
-                  ) : null}
+                  )}
+
+                  {/* Message Text */}
+                  {msg.attachmentType !== 'AUDIO' && (
+                    msg.text ? (
+                      <div className="horizon-bubble-text">{msg.text}</div>
+                    ) : !isMedia ? (
+                      <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.7 }}>
+                        (Empty message)
+                      </div>
+                    ) : null
+                  )}
 
                   {/* Metadata (Timestamp + Status Ticks) */}
                   <div className="horizon-bubble-meta">
