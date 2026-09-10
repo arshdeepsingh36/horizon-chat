@@ -64,6 +64,12 @@ interface ApiService {
         @Header("Authorization") token: String,
         @Path("id") messageId: Long
     ): Response<GenericResponse>
+
+    @POST("api/media/upload")
+    suspend fun uploadMedia(
+        @Header("Authorization") token: String,
+        @Body request: MediaUploadRequest
+    ): Response<MediaUploadResponse>
 }
 
 object ApiClient {

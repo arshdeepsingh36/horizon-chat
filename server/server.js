@@ -40,11 +40,24 @@ const r2Client = (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && p
     })
   : null;
 
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
-app.use(express.json({ limit: '10mb' }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT'] }));
+app.use(express.json({ limit: '20mb' }));
+app.use('/uploads', express.static(uploadsDir));
 
 // In-Memory Socket Map: userId (Int) -> Set<socket.id>
 const onlineUsers = new Map();
@@ -346,16 +359,48 @@ app.put('/api/media/mock-upload/:key', (req, res) => {
   return res.status(200).send({ success: true, message: 'Simulated R2 Direct Upload Successful' });
 });
 
-app.post('/api/media/upload', authenticateToken, (req, res) => {
-  const defaultThumbnailBlur = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAMklEQVR42mNk+M9Qz0AEYCJVE6OaRjWNahrVNKppVNOoplFNo5pGNY1qGtU0qmlU06iSAQBvGQ4RFy5yRwAAAABJRU5ErkJggg==';
-  const attachmentUrl = req.body.attachmentUrl || 'https://pub-r2.storage.cloud/horizon_sunset_ambient.png';
-  const fileSizeBytes = req.body.fileSizeBytes || 2457812;
+app.post('/api/media/upload', authenticateToken, async (req, res) => {
+  try {
+    const { imageBase64, fileName, attachmentUrl: inputUrl, fileSizeBytes: inputSize, thumbnailBlur: clientBlur } = req.body || {};
+    const defaultThumbnailBlur = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAMklEQVR42mNk+M9Qz0AEYCJVE6OaRjWNahrVNKppVNOoplFNo5pGNY1qGtU0qmlU06iSAQBvGQ4RFy5yRwAAAABJRU5ErkJggg==';
 
-  res.json({
-    attachmentUrl,
-    thumbnailBlur: defaultThumbnailBlur,
-    fileSizeBytes
-  });
+    if (imageBase64 && typeof imageBase64 === 'string') {
+      const matches = imageBase64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      let buffer;
+      let ext = 'jpg';
+      if (matches && matches.length === 3) {
+        const mime = matches[1];
+        if (mime.includes('png')) ext = 'png';
+        else if (mime.includes('webp')) ext = 'webp';
+        buffer = Buffer.from(matches[2], 'base64');
+      } else {
+        buffer = Buffer.from(imageBase64, 'base64');
+      }
+
+      const cleanFileName = fileName ? fileName.replace(/[^a-zA-Z0-9._-]/g, '_') : `img_${Date.now()}.${ext}`;
+      const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${cleanFileName}`;
+      const filePath = path.join(uploadsDir, uniqueName);
+      fs.writeFileSync(filePath, buffer);
+
+      const serverHost = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
+      const publicUrl = `${serverHost}/uploads/${uniqueName}`;
+
+      return res.json({
+        attachmentUrl: publicUrl,
+        thumbnailBlur: clientBlur || defaultThumbnailBlur,
+        fileSizeBytes: buffer.length
+      });
+    }
+
+    res.json({
+      attachmentUrl: inputUrl || 'https://pub-r2.storage.cloud/horizon_sunset_ambient.png',
+      thumbnailBlur: clientBlur || defaultThumbnailBlur,
+      fileSizeBytes: inputSize || 2457812
+    });
+  } catch (err) {
+    console.error('[MEDIA UPLOAD ERROR]', err);
+    return res.status(500).json({ error: 'Failed to upload media' });
+  }
 });
 
 // Initialize Socket.io
@@ -409,6 +454,27 @@ io.on('connection', (socket) => {
     const recipientOnline = isUserOnline(rId);
     const initialStatus = recipientOnline ? 'DELIVERED' : 'SENT';
 
+    // Auto-save direct Base64 Data URL to uploads directory
+    let finalAttachmentUrl = attachmentUrl;
+    if (attachmentUrl && typeof attachmentUrl === 'string' && attachmentUrl.startsWith('data:image/')) {
+      try {
+        const matches = attachmentUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const mime = matches[1];
+          let ext = 'jpg';
+          if (mime.includes('png')) ext = 'png';
+          else if (mime.includes('webp')) ext = 'webp';
+          const buf = Buffer.from(matches[2], 'base64');
+          const uniqueName = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+          fs.writeFileSync(path.join(uploadsDir, uniqueName), buf);
+          const serverHost = process.env.RENDER_EXTERNAL_URL || 'https://horizon-chat-1.onrender.com';
+          finalAttachmentUrl = `${serverHost}/uploads/${uniqueName}`;
+        }
+      } catch (err) {
+        console.error('[SOCKET IMAGE AUTO-SAVE ERROR]', err);
+      }
+    }
+
     try {
       // 1. Write to database
       const savedRecord = await saveMessageTRD({
@@ -416,7 +482,7 @@ io.on('connection', (socket) => {
         recipientId: rId,
         text: text || '',
         attachmentType,
-        attachmentUrl,
+        attachmentUrl: finalAttachmentUrl,
         thumbnailBlur,
         fileSizeBytes,
         status: initialStatus,

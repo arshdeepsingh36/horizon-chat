@@ -259,67 +259,84 @@ export default function HorizonChatView({
     );
   };
 
-  // 5. Send Media with 20x20 Micro-Preview
-  const handleSendMediaSample = async () => {
-    if (!socket) return;
+  // 5. Send Real Media File with Micro-Preview
+  const fileInputRef = useRef(null);
 
-    try {
-      // Request micro-preview generation from server endpoint (TRD Section 3.5)
-      const res = await fetch(`${apiBaseUrl}/api/media/upload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          attachmentUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80',
-          fileSizeBytes: 2457812
-        })
-      });
-      const mediaData = await res.json();
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
 
-      const optimisticId = Date.now();
-      const optimisticMsg = {
-        id: optimisticId,
-        senderId: Number(user.id),
-        recipientId: Number(partner.id),
-        text: 'Sunset Horizon View',
-        attachmentType: 'IMAGE',
-        attachmentUrl: mediaData.attachmentUrl,
-        thumbnailBlur: mediaData.thumbnailBlur,
-        fileSizeBytes: mediaData.fileSizeBytes,
-        status: isPartnerOnline ? 'DELIVERED' : 'SENT',
-        createdAt: new Date().toISOString()
-      };
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !socket) return;
 
-      setMessages((prev) => [...prev, optimisticMsg]);
-      setTimeout(() => {
-        if (canvasRef.current) canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
-      }, 20);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result;
+      if (!base64) return;
 
-      socket.emit(
-        'send_message',
-        {
-          recipientId: partner.id,
-          text: 'Sunset Horizon View',
+      try {
+        const res = await fetch(`${apiBaseUrl}/api/media/upload`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            imageBase64: base64,
+            fileName: file.name,
+            fileSizeBytes: file.size
+          })
+        });
+        const mediaData = await res.json();
+        const finalUrl = mediaData?.attachmentUrl || base64;
+
+        const optimisticId = Date.now();
+        const optimisticMsg = {
+          id: optimisticId,
+          senderId: Number(user.id),
+          recipientId: Number(partner.id),
+          text: file.name || 'Photo',
           attachmentType: 'IMAGE',
-          attachmentUrl: mediaData.attachmentUrl,
-          thumbnailBlur: mediaData.thumbnailBlur,
-          fileSizeBytes: mediaData.fileSizeBytes
-        },
-        (response) => {
-          if (response?.success && response.message) {
-            const saved = normalizeMsg(response.message);
-            setMessages((prev) =>
-              prev.map((m) => (m.id === optimisticId ? saved : m))
-            );
-            if (onMessageSent) onMessageSent();
+          attachmentUrl: finalUrl,
+          thumbnailBlur: mediaData?.thumbnailBlur || base64,
+          fileSizeBytes: file.size,
+          status: isPartnerOnline ? 'DELIVERED' : 'SENT',
+          createdAt: new Date().toISOString()
+        };
+
+        setMessages((prev) => [...prev, optimisticMsg]);
+        setTimeout(() => {
+          if (canvasRef.current) canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
+        }, 20);
+
+        socket.emit(
+          'send_message',
+          {
+            recipientId: partner.id,
+            text: file.name || 'Photo',
+            attachmentType: 'IMAGE',
+            attachmentUrl: finalUrl,
+            thumbnailBlur: mediaData?.thumbnailBlur || base64,
+            fileSizeBytes: file.size
+          },
+          (response) => {
+            if (response?.success && response.message) {
+              const saved = normalizeMsg(response.message);
+              setMessages((prev) =>
+                prev.map((m) => (m.id === optimisticId ? saved : m))
+              );
+              if (onMessageSent) onMessageSent();
+            }
           }
-        }
-      );
-    } catch (err) {
-      console.error('[SEND MEDIA ERROR]', err);
-    }
+        );
+      } catch (err) {
+        console.error('[ATTACH FILE ERROR]', err);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Reset file input value so selecting the same file again triggers onChange
+    e.target.value = '';
   };
 
   // 6. Tap-to-Download Media Handler (Rules Section 3: Blurhash/Micro-Preview mandatory)
@@ -515,11 +532,19 @@ export default function HorizonChatView({
 
       {/* Horizontal Input Dock (activity_chat.xml) */}
       <form onSubmit={handleSendMessage} className="horizon-input-dock">
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept="image/*"
+          style={{ display: 'none' }}
+        />
+
         <button
           type="button"
-          onClick={handleSendMediaSample}
+          onClick={handleAttachClick}
           className="horizon-dock-clip"
-          title="Send Sunset Image (20x20 Micro-Preview)"
+          title="Attach Image"
           id="btnAttachMedia"
         >
           <Paperclip size={20} />

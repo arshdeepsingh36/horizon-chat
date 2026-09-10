@@ -128,3 +128,28 @@ data class PresignResponse(
     @SerializedName("fileSizeBytes")
     val fileSizeBytes: Long
 )
+
+data class MediaUploadRequest(
+    @SerializedName("imageBase64")
+    val imageBase64: String,
+
+    @SerializedName("fileName")
+    val fileName: String? = null,
+
+    @SerializedName("fileSizeBytes")
+    val fileSizeBytes: Long? = null,
+
+    @SerializedName("thumbnailBlur")
+    val thumbnailBlur: String? = null
+)
+
+data class MediaUploadResponse(
+    @SerializedName("attachmentUrl")
+    val attachmentUrl: String,
+
+    @SerializedName("thumbnailBlur")
+    val thumbnailBlur: String?,
+
+    @SerializedName("fileSizeBytes")
+    val fileSizeBytes: Long
+)

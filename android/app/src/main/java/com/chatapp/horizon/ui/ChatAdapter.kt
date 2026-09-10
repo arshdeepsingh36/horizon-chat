@@ -222,9 +222,20 @@ class ChatAdapter(
                 onDownloadClicked(msg)
 
                 if (!msg.attachmentUrl.isNullOrEmpty()) {
-                    Glide.with(context)
-                        .load(msg.attachmentUrl)
-                        .into(binding.ivThumbnail)
+                    if (msg.attachmentUrl.startsWith("data:image/")) {
+                        try {
+                            val cleanBase64 = msg.attachmentUrl.substringAfter("base64,")
+                            val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                            val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                            binding.ivThumbnail.setImageBitmap(bitmap)
+                        } catch (e: Exception) {
+                            Glide.with(context).load(msg.attachmentUrl).into(binding.ivThumbnail)
+                        }
+                    } else {
+                        Glide.with(context)
+                            .load(msg.attachmentUrl)
+                            .into(binding.ivThumbnail)
+                    }
                     binding.pbLoading.visibility = View.GONE
                 }
             }

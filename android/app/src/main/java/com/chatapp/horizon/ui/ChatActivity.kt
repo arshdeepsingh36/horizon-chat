@@ -250,42 +250,80 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun handlePickedImage(uri: Uri) {
-        try {
-            val inputStream = contentResolver.openInputStream(uri)
-            val originalBitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                val originalBitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
 
-            if (originalBitmap != null) {
-                // Generate 20x20 micro-blur thumbnail
-                val microThumb = Bitmap.createScaledBitmap(originalBitmap, 20, 20, true)
-                val thumbStream = ByteArrayOutputStream()
-                microThumb.compress(Bitmap.CompressFormat.JPEG, 60, thumbStream)
-                val thumbBase64 = "data:image/jpeg;base64," + Base64.encodeToString(thumbStream.toByteArray(), Base64.NO_WRAP)
+                if (originalBitmap != null) {
+                    // Downscale large camera photos to max 1280px for instant upload
+                    val maxDim = 1280
+                    val width = originalBitmap.width
+                    val height = originalBitmap.height
+                    val ratio = Math.min(1.0, maxDim.toDouble() / Math.max(width, height))
+                    val scaledBitmap = if (ratio < 1.0) {
+                        Bitmap.createScaledBitmap(originalBitmap, (width * ratio).toInt(), (height * ratio).toInt(), true)
+                    } else {
+                        originalBitmap
+                    }
 
-                // Compress image for upload simulation
-                val fullStream = ByteArrayOutputStream()
-                originalBitmap.compress(Bitmap.CompressFormat.JPEG, 75, fullStream)
-                val fullSize = fullStream.size().toLong()
+                    // 1. Generate 20x20 micro-blur thumbnail
+                    val microThumb = Bitmap.createScaledBitmap(scaledBitmap, 20, 20, true)
+                    val thumbStream = ByteArrayOutputStream()
+                    microThumb.compress(Bitmap.CompressFormat.JPEG, 60, thumbStream)
+                    val thumbBase64 = "data:image/jpeg;base64," + Base64.encodeToString(thumbStream.toByteArray(), Base64.NO_WRAP)
 
-                val viewOnce = isViewOnceActive
-                isViewOnceActive = false
-                updateViewOnceToggleUI()
+                    // 2. Compress full image (JPEG 75% quality)
+                    val fullStream = ByteArrayOutputStream()
+                    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, fullStream)
+                    val imageBytes = fullStream.toByteArray()
+                    val fullSize = imageBytes.size.toLong()
+                    val fullBase64 = "data:image/jpeg;base64," + Base64.encodeToString(imageBytes, Base64.NO_WRAP)
 
-                // High quality data URI or R2 simulation URL
-                val simulatedUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800"
+                    val viewOnce = isViewOnceActive
+                    withContext(Dispatchers.Main) {
+                        isViewOnceActive = false
+                        updateViewOnceToggleUI()
+                    }
 
-                sendMessage(
-                    text = if (viewOnce) "View Once Photo" else "Photo",
-                    attachmentType = "IMAGE",
-                    attachmentUrl = simulatedUrl,
-                    thumbnailBlur = thumbBase64,
-                    fileSizeBytes = fullSize,
-                    isViewOnce = viewOnce
-                )
+                    // 3. Upload real image to server
+                    var uploadedUrl: String? = null
+                    try {
+                        val uploadReq = MediaUploadRequest(
+                            imageBase64 = fullBase64,
+                            fileName = "photo_${System.currentTimeMillis()}.jpg",
+                            fileSizeBytes = fullSize,
+                            thumbnailBlur = thumbBase64
+                        )
+                        val uploadRes = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
+                        if (uploadRes.isSuccessful && uploadRes.body() != null) {
+                            uploadedUrl = uploadRes.body()!!.attachmentUrl
+                        }
+                    } catch (uploadErr: Exception) {
+                        uploadErr.printStackTrace()
+                    }
+
+                    // 4. If upload request failed, fallback to direct data URI so recipient still sees the actual image
+                    val finalUrl = uploadedUrl ?: fullBase64
+
+                    withContext(Dispatchers.Main) {
+                        sendMessage(
+                            text = if (viewOnce) "View Once Photo" else "Photo",
+                            attachmentType = "IMAGE",
+                            attachmentUrl = finalUrl,
+                            thumbnailBlur = thumbBase64,
+                            fileSizeBytes = fullSize,
+                            isViewOnce = viewOnce
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Failed to load image: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Failed to load image: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -401,8 +439,21 @@ class ChatActivity : AppCompatActivity() {
 
         dialog.setContentView(frameLayout)
 
-        val imageUrl = msg.attachmentUrl ?: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800"
-        Glide.with(this).load(imageUrl).into(imageView)
+        val imageUrl = msg.attachmentUrl
+        if (!imageUrl.isNullOrEmpty()) {
+            if (imageUrl.startsWith("data:image/")) {
+                try {
+                    val cleanBase64 = imageUrl.substringAfter("base64,")
+                    val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                    val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                    imageView.setImageBitmap(bitmap)
+                } catch (e: Exception) {
+                    Glide.with(this).load(imageUrl).into(imageView)
+                }
+            } else {
+                Glide.with(this).load(imageUrl).into(imageView)
+            }
+        }
 
         dialog.setOnDismissListener {
             // Mark viewed via REST and Socket
