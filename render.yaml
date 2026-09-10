@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: horizon-chat-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    plan: free
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # User supplies their Neon PostgreSQL connection string
+      - key: PORT
+        value: 5000
