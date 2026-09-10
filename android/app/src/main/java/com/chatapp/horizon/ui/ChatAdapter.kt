@@ -107,6 +107,9 @@ class ChatAdapter(
     }
 
     fun updateOptimisticMessage(tempId: Long, serverMsg: ChatMessage) {
+        if (activePlayingMsgId == tempId) {
+            activePlayingMsgId = serverMsg.id
+        }
         val index = messages.indexOfFirst { it.id == tempId }
         if (index != -1) {
             messages[index] = serverMsg
@@ -222,10 +225,9 @@ class ChatAdapter(
                 val player = MediaPlayer()
                 activeMediaPlayer = player
                 player.setDataSource(file.absolutePath)
-                player.setOnPreparedListener { mp ->
-                    mp.start()
-                    startProgressUpdater(holderBinding)
-                }
+                player.prepare()
+                player.start()
+                startProgressUpdater(holderBinding)
                 player.setOnCompletionListener {
                     holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
                     holderBinding.pbAudioProgress.progress = 0
@@ -243,7 +245,6 @@ class ChatAdapter(
                     Toast.makeText(context, "Unable to play audio format", Toast.LENGTH_SHORT).show()
                     true
                 }
-                player.prepareAsync()
             } catch (e: Exception) {
                 e.printStackTrace()
                 releaseMediaPlayer()
@@ -284,14 +285,31 @@ class ChatAdapter(
             return
         }
 
+        val resolvedUrl = when {
+            audioUrl.startsWith("http://horizon-chat-1.onrender.com") -> audioUrl.replace("http://", "https://")
+            audioUrl.startsWith("http://") || audioUrl.startsWith("https://") || audioUrl.startsWith("data:") -> audioUrl
+            else -> "${ApiClient.BASE_URL.trimEnd('/')}/${audioUrl.trimStart('/')}"
+        }
+
         // 4. Remote HTTP/HTTPS Audio: Download to cache in background, then play
         Thread {
             try {
-                val netUrl = URL(audioUrl)
-                val connection = netUrl.openConnection() as HttpURLConnection
-                connection.connectTimeout = 10000
-                connection.readTimeout = 15000
+                var currentUrl = resolvedUrl
+                var connection = URL(currentUrl).openConnection() as HttpURLConnection
+                connection.connectTimeout = 15000
+                connection.readTimeout = 20000
                 connection.instanceFollowRedirects = true
+
+                var redirects = 0
+                while (connection.responseCode in 300..399 && redirects < 5) {
+                    val location = connection.getHeaderField("Location") ?: break
+                    connection.disconnect()
+                    currentUrl = if (location.startsWith("http")) location else URL(URL(currentUrl), location).toString()
+                    connection = URL(currentUrl).openConnection() as HttpURLConnection
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 20000
+                    redirects++
+                }
 
                 if (connection.responseCode in 200..299) {
                     val tempDownload = File(voiceDir, "dl_tmp_${msg.id}_${System.currentTimeMillis()}.m4a")
@@ -338,9 +356,11 @@ class ChatAdapter(
         progressRunnable = object : Runnable {
             override fun run() {
                 val mp = activeMediaPlayer
-                if (mp != null && mp.isPlaying && mp.duration > 0) {
-                    val progress = ((mp.currentPosition.toDouble() / mp.duration) * 100).toInt()
-                    holderBinding.pbAudioProgress.progress = progress
+                if (mp != null && mp.isPlaying) {
+                    if (mp.duration > 0) {
+                        val progress = ((mp.currentPosition.toDouble() / mp.duration) * 100).toInt()
+                        holderBinding.pbAudioProgress.progress = progress.coerceIn(0, 100)
+                    }
                     progressHandler.postDelayed(this, 100)
                 }
             }

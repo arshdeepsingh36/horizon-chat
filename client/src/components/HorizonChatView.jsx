@@ -84,7 +84,11 @@ export default function HorizonChatView({
     }
 
     try {
-      const audio = new Audio(audioUrl);
+      const resolvedUrl = (audioUrl.startsWith('http') || audioUrl.startsWith('data:'))
+        ? (audioUrl.startsWith('http://horizon-chat-1.onrender.com') ? audioUrl.replace('http://', 'https://') : audioUrl)
+        : `${apiBaseUrl.replace(/\/$/, '')}/${audioUrl.replace(/^\//, '')}`;
+
+      const audio = new Audio(resolvedUrl);
       activeAudioRef.current = audio;
       setPlayingVoiceId(msgId);
       setVoiceProgress(0);
@@ -100,10 +104,10 @@ export default function HorizonChatView({
         setVoiceProgress(0);
       };
 
-      audio.onerror = () => {
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
         setPlayingVoiceId(null);
         setVoiceProgress(0);
-        alert('Voice note could not be played. File may be unavailable or expired.');
       };
 
       audio.play().catch((err) => {
