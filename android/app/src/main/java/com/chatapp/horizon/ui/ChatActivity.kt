@@ -198,6 +198,23 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun sendMessage(text: String) {
+        val optimisticMsg = ChatMessage(
+            id = System.currentTimeMillis(),
+            senderId = currentUserId,
+            recipientId = targetUserId,
+            messageText = text,
+            attachmentType = "NONE",
+            attachmentUrl = null,
+            thumbnailBlur = null,
+            fileSizeBytes = 0,
+            status = "SENT",
+            createdAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date())
+        )
+        adapter.appendMessage(optimisticMsg)
+        binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
+
         val payload = JSONObject().apply {
             put("recipientId", targetUserId)
             put("text", text)
