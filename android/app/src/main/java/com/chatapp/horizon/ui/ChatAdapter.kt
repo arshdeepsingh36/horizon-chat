@@ -21,6 +21,10 @@ import com.chatapp.horizon.databinding.ItemChatVoiceBinding
 import com.chatapp.horizon.databinding.ItemMessageReceivedBinding
 import com.chatapp.horizon.databinding.ItemMessageSentBinding
 import com.chatapp.horizon.models.ChatMessage
+import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -45,6 +49,23 @@ class ChatAdapter(
     }
 
     private val messages = mutableListOf<ChatMessage>()
+    private var activeMediaPlayer: MediaPlayer? = null
+    private var activePlayingMsgId: Long? = null
+    private val progressHandler = Handler(Looper.getMainLooper())
+    private var progressRunnable: Runnable? = null
+
+    fun releaseMediaPlayer() {
+        progressRunnable?.let { progressHandler.removeCallbacks(it) }
+        try {
+            activeMediaPlayer?.stop()
+            activeMediaPlayer?.release()
+        } catch (e: Exception) {
+            // ignore
+        } finally {
+            activeMediaPlayer = null
+            activePlayingMsgId = null
+        }
+    }
 
     fun setMessages(newMessages: List<ChatMessage>) {
         messages.clear()
@@ -131,7 +152,9 @@ class ChatAdapter(
             TYPE_SENT_TEXT -> SentTextViewHolder(ItemMessageSentBinding.inflate(inflater, parent, false))
             TYPE_RECEIVED_TEXT -> ReceivedTextViewHolder(ItemMessageReceivedBinding.inflate(inflater, parent, false))
             TYPE_SENT_MEDIA, TYPE_RECEIVED_MEDIA -> MediaViewHolder(ItemChatSentMediaBinding.inflate(inflater, parent, false))
-            TYPE_VOICE -> VoiceViewHolder(ItemChatVoiceBinding.inflate(inflater, parent, false))
+            TYPE_VOICE -> VoiceViewHolder(ItemChatVoiceBinding.inflate(inflater, parent, false)) { m, b ->
+                handleVoicePlayback(m, b)
+            }
             TYPE_LOCATION -> LocationViewHolder(ItemChatLocationBinding.inflate(inflater, parent, false))
             TYPE_DOCUMENT -> DocViewHolder(ItemChatDocBinding.inflate(inflater, parent, false))
             else -> SentTextViewHolder(ItemMessageSentBinding.inflate(inflater, parent, false))
@@ -145,10 +168,105 @@ class ChatAdapter(
             is SentTextViewHolder -> holder.bind(msg)
             is ReceivedTextViewHolder -> holder.bind(msg)
             is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked, onImageClicked)
-            is VoiceViewHolder -> holder.bind(msg, isSent)
+            is VoiceViewHolder -> holder.bind(msg, isSent, msg.id == activePlayingMsgId && activeMediaPlayer?.isPlaying == true)
             is LocationViewHolder -> holder.bind(msg, isSent)
             is DocViewHolder -> holder.bind(msg, isSent, onDocumentClicked)
         }
+    }
+
+    private fun handleVoicePlayback(msg: ChatMessage, holderBinding: ItemChatVoiceBinding) {
+        val context = holderBinding.root.context
+        val audioUrl = msg.attachmentUrl
+        if (audioUrl.isNullOrEmpty()) {
+            Toast.makeText(context, "Voice note audio not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // If clicking the currently playing message -> pause it
+        if (activePlayingMsgId == msg.id && activeMediaPlayer?.isPlaying == true) {
+            activeMediaPlayer?.pause()
+            holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+            progressRunnable?.let { progressHandler.removeCallbacks(it) }
+            return
+        }
+
+        // If clicking a paused current message -> resume
+        if (activePlayingMsgId == msg.id && activeMediaPlayer != null) {
+            activeMediaPlayer?.start()
+            holderBinding.btnPlayPause.setImageResource(R.drawable.ic_pause_circle)
+            startProgressUpdater(holderBinding)
+            return
+        }
+
+        // Stop previously playing audio and notify changed
+        val prevPlayingId = activePlayingMsgId
+        releaseMediaPlayer()
+        if (prevPlayingId != null) {
+            val prevIndex = messages.indexOfFirst { it.id == prevPlayingId }
+            if (prevIndex != -1) notifyItemChanged(prevIndex)
+        }
+
+        activePlayingMsgId = msg.id
+        holderBinding.btnPlayPause.setImageResource(R.drawable.ic_pause_circle)
+        holderBinding.pbAudioProgress.progress = 0
+
+        try {
+            val player = MediaPlayer()
+            activeMediaPlayer = player
+
+            if (audioUrl.startsWith("data:audio/")) {
+                val cleanBase64 = audioUrl.substringAfter("base64,")
+                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                val tempFile = File(context.cacheDir, "voice_play_${msg.id}.m4a")
+                tempFile.writeBytes(decodedBytes)
+                player.setDataSource(tempFile.absolutePath)
+            } else {
+                player.setDataSource(audioUrl)
+            }
+
+            player.setOnPreparedListener { mp ->
+                mp.start()
+                startProgressUpdater(holderBinding)
+            }
+            player.setOnCompletionListener {
+                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                holderBinding.pbAudioProgress.progress = 0
+                val finishedId = activePlayingMsgId
+                releaseMediaPlayer()
+                if (finishedId != null) {
+                    val idx = messages.indexOfFirst { it.id == finishedId }
+                    if (idx != -1) notifyItemChanged(idx)
+                }
+            }
+            player.setOnErrorListener { _, _, _ ->
+                holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+                holderBinding.pbAudioProgress.progress = 0
+                releaseMediaPlayer()
+                Toast.makeText(context, "Failed to stream voice note", Toast.LENGTH_SHORT).show()
+                true
+            }
+            player.prepareAsync()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            releaseMediaPlayer()
+            holderBinding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+            Toast.makeText(context, "Error playing audio: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startProgressUpdater(holderBinding: ItemChatVoiceBinding) {
+        progressRunnable?.let { progressHandler.removeCallbacks(it) }
+        progressRunnable = object : Runnable {
+            override fun run() {
+                val mp = activeMediaPlayer
+                if (mp != null && mp.isPlaying && mp.duration > 0) {
+                    val progress = ((mp.currentPosition.toDouble() / mp.duration) * 100).toInt()
+                    holderBinding.pbAudioProgress.progress = progress
+                    progressHandler.postDelayed(this, 100)
+                }
+            }
+        }
+        progressHandler.post(progressRunnable!!)
     }
 
     class SentTextViewHolder(private val binding: ItemMessageSentBinding) :
@@ -275,9 +393,11 @@ class ChatAdapter(
         }
     }
 
-    class VoiceViewHolder(private val binding: ItemChatVoiceBinding) :
-        RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage, isSent: Boolean) {
+    class VoiceViewHolder(
+        private val binding: ItemChatVoiceBinding,
+        private val onPlayVoiceClicked: (ChatMessage, ItemChatVoiceBinding) -> Unit
+    ) : RecyclerView.ViewHolder(binding.root) {
+        fun bind(msg: ChatMessage, isSent: Boolean, isCurrentlyPlaying: Boolean) {
             val context = itemView.context
             val params = binding.cardVoice.layoutParams as ConstraintLayout.LayoutParams
             if (isSent) {
@@ -297,17 +417,14 @@ class ChatAdapter(
             binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
             binding.tvDuration.text = if (!msg.messageText.isNullOrEmpty()) msg.messageText else "0:12"
 
-            var isPlaying = false
+            if (isCurrentlyPlaying) {
+                binding.btnPlayPause.setImageResource(R.drawable.ic_pause_circle)
+            } else {
+                binding.btnPlayPause.setImageResource(R.drawable.ic_play_arrow)
+            }
+
             binding.btnPlayPause.setOnClickListener {
-                isPlaying = !isPlaying
-                if (isPlaying) {
-                    binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-                    binding.pbAudioProgress.progress = 65
-                    Toast.makeText(context, "Playing voice note...", Toast.LENGTH_SHORT).show()
-                } else {
-                    binding.btnPlayPause.setImageResource(android.R.drawable.ic_media_play)
-                    binding.pbAudioProgress.progress = 0
-                }
+                onPlayVoiceClicked(msg, binding)
             }
         }
     }
