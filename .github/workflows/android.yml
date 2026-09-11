@@ -73,14 +73,14 @@ jobs:
 
       - name: Deploy APK to apk-dist branch
         run: |
+          mkdir -p dist_apk
+          base64 -w 0 release_apk/app-debug.apk > dist_apk/app-debug.b64
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B apk-dist
-          mkdir -p apk
-          cp release_apk/app-debug.apk apk/app-debug.apk
-          git add -f apk/app-debug.apk
-          git commit -m "deploy: update app-debug.apk from commit ${GITHUB_SHA::7}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" apk-dist
+          git add -f dist_apk/app-debug.b64
+          git commit -m "deploy: update app-debug.b64 from commit ${GITHUB_SHA::7}"
+          git push -f origin apk-dist
 
       - name: Create or Update GitHub Release
         continue-on-error: true

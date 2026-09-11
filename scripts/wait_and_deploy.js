@@ -13,6 +13,22 @@ if (!fs.existsSync(LOCAL_DIR)) {
   fs.mkdirSync(LOCAL_DIR, { recursive: true });
 }
 
+function fetchString(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { 'User-Agent': 'node-deploy-script' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchString(res.headers.location).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error('Fetch failed with status: ' + res.statusCode));
+      }
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+}
+
 function downloadBinary(url, destPath) {
   return new Promise((resolve, reject) => {
     https.get(url, { headers: { 'User-Agent': 'node-deploy-script' } }, (res) => {
@@ -34,31 +50,43 @@ function sleep(ms) {
 }
 
 async function waitForAndDownloadApk() {
-  const branchUrl = `https://raw.githubusercontent.com/${REPO}/apk-dist/apk/app-debug.apk`;
+  const b64Url = `https://raw.githubusercontent.com/${REPO}/apk-dist/dist_apk/app-debug.b64`;
   const releaseUrl = `https://github.com/${REPO}/releases/download/v2.0-latest/app-debug.apk`;
   console.log(`--- Waiting for fresh APK build on GitHub ---`);
-
-  const tempApk = path.resolve(LOCAL_DIR, 'app-debug-downloading.apk');
 
   let attempts = 0;
   while (attempts < 30) {
     attempts++;
     console.log(`[${new Date().toLocaleTimeString()}] Attempt ${attempts}: Checking for updated APK...`);
-    for (const url of [branchUrl, releaseUrl]) {
-      try {
-        if (fs.existsSync(tempApk)) fs.unlinkSync(tempApk);
-        await downloadBinary(url, tempApk);
-        const stats = fs.statSync(tempApk);
-        if (stats.size > 5 * 1024 * 1024) {
-          fs.copyFileSync(tempApk, LOCAL_APK);
-          fs.unlinkSync(tempApk);
-          console.log(`✅ Downloaded new release APK: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)} MB) from ${url}`);
-          return true;
-        }
-      } catch (e) {
-        // Continue checking
+
+    // 1. Try base64 artifact from apk-dist branch
+    try {
+      const b64Data = await fetchString(b64Url);
+      if (b64Data && b64Data.length > 500000) {
+        const buf = Buffer.from(b64Data.trim(), 'base64');
+        fs.writeFileSync(LOCAL_APK, buf);
+        console.log(`✅ Decoded fresh APK: ${buf.length} bytes (${(buf.length / 1024 / 1024).toFixed(2)} MB) from ${b64Url}`);
+        return true;
       }
+    } catch (e) {
+      // Branch not created yet or in-flight
     }
+
+    // 2. Try release asset
+    try {
+      const tempApk = path.resolve(LOCAL_DIR, 'temp.apk');
+      await downloadBinary(releaseUrl, tempApk);
+      const stats = fs.statSync(tempApk);
+      if (stats.size > 5 * 1024 * 1024) {
+        fs.copyFileSync(tempApk, LOCAL_APK);
+        fs.unlinkSync(tempApk);
+        console.log(`✅ Downloaded release APK: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+        return true;
+      }
+    } catch (e) {
+      // In-flight
+    }
+
     await sleep(8000);
   }
   throw new Error('Timed out waiting for APK');
