@@ -201,7 +201,7 @@ class ChatActivity : AppCompatActivity() {
 
         renderToolbarAvatar()
 
-        // Tapping recipient avatar or name opens dedicated UserProfileActivity
+        // Tapping recipient header, avatar, name, or info icon opens dedicated UserProfileActivity
         val openProfileListener = View.OnClickListener {
             val intent = Intent(this, UserProfileActivity::class.java).apply {
                 putExtra("CURRENT_USER_ID", currentUserId)
@@ -216,8 +216,22 @@ class ChatActivity : AppCompatActivity() {
             }
             profileLauncher.launch(intent)
         }
+        binding.layoutToolbarProfileHeader.setOnClickListener(openProfileListener)
         binding.ivRecipientAvatar.setOnClickListener(openProfileListener)
         binding.tvRecipientName.setOnClickListener(openProfileListener)
+        binding.btnInfoProfile.setOnClickListener(openProfileListener)
+
+        // Toolbar In-Chat Search Button Toggle
+        binding.btnSearchChat.setOnClickListener {
+            if (binding.layoutInChatSearch.visibility == View.VISIBLE) {
+                binding.layoutInChatSearch.visibility = View.GONE
+                binding.etSearchInChat.setText("")
+                adapter.setMessages(cachedMessageList)
+            } else {
+                binding.layoutInChatSearch.visibility = View.VISIBLE
+                binding.etSearchInChat.requestFocus()
+            }
+        }
 
         // In-Chat Search Listener
         binding.etSearchInChat.addTextChangedListener(object : TextWatcher {
@@ -738,6 +752,47 @@ class ChatActivity : AppCompatActivity() {
                 .circleCrop()
                 .placeholder(android.R.drawable.sym_def_app_icon)
                 .into(binding.ivRecipientAvatar)
+        }
+        updatePresenceUI(isTargetOnline, false)
+    }
+
+    private fun updatePresenceUI(isOnline: Boolean, isTyping: Boolean) {
+        if (isTyping) {
+            binding.tvPresence.text = "typing..."
+            binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.accent_amber))
+            binding.viewOnlineDot.visibility = View.VISIBLE
+        } else if (isOnline) {
+            binding.tvPresence.text = "online"
+            binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.ticks_sent))
+            binding.viewOnlineDot.visibility = View.VISIBLE
+        } else {
+            binding.tvPresence.text = formatLastSeen(targetLastSeen)
+            binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+            binding.viewOnlineDot.visibility = View.GONE
+        }
+    }
+
+    private fun formatLastSeen(iso: String?): String {
+        if (iso.isNullOrEmpty()) return "offline"
+        return try {
+            val utcFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val date = try {
+                utcFormat.parse(iso)
+            } catch (e: Exception) {
+                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(iso)
+            }
+            if (date != null) {
+                val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                "last seen " + timeFormat.format(date)
+            } else {
+                "offline"
+            }
+        } catch (e: Exception) {
+            "offline"
         }
     }
 
@@ -1316,17 +1371,11 @@ class ChatActivity : AppCompatActivity() {
             mSocket?.on("user_typing") { args ->
                 if (args.isNotEmpty()) {
                     val data = args[0] as? JSONObject
-                    val senderId = data?.optInt("userId", data.optInt("senderId", -1)) ?: -1
+                    val senderId = data?.optInt("userId", data?.optInt("senderId", -1) ?: -1) ?: -1
                     val isTyping = data?.optBoolean("isTyping", false) ?: false
                     if (senderId == targetUserId) {
                         runOnUiThread {
-                            if (isTyping) {
-                                binding.tvPresence.text = "typing..."
-                                binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.accent_amber))
-                            } else {
-                                binding.tvPresence.text = "online"
-                                binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.ticks_sent))
-                            }
+                            updatePresenceUI(isTargetOnline, isTyping)
                         }
                     }
                 }
@@ -1350,8 +1399,9 @@ class ChatActivity : AppCompatActivity() {
                     val uId = data?.optInt("userId")
                     val status = data?.optString("status")
                     if (uId == targetUserId) {
+                        isTargetOnline = status == "online"
                         runOnUiThread {
-                            binding.tvPresence.text = status
+                            updatePresenceUI(isTargetOnline, false)
                         }
                     }
                 }

@@ -146,13 +146,12 @@ class ChatAdapter(
         val msg = messages[position]
         val isSent = msg.senderId == currentUserId
         return when {
+            msg.isViewOnce -> if (isSent) TYPE_SENT_MEDIA else TYPE_RECEIVED_MEDIA
             msg.attachmentType == "VIDEO" -> TYPE_VIDEO
             msg.attachmentType == "AUDIO" -> TYPE_VOICE
             msg.attachmentType == "LOCATION" -> TYPE_LOCATION
             msg.attachmentType == "DOCUMENT" -> TYPE_DOCUMENT
-            msg.attachmentType == "IMAGE" || msg.isViewOnce -> {
-                if (isSent) TYPE_SENT_MEDIA else TYPE_RECEIVED_MEDIA
-            }
+            msg.attachmentType == "IMAGE" -> if (isSent) TYPE_SENT_MEDIA else TYPE_RECEIVED_MEDIA
             isSent -> TYPE_SENT_TEXT
             else -> TYPE_RECEIVED_TEXT
         }
@@ -637,7 +636,14 @@ class ChatAdapter(
                 "▶ Video"
             }
 
-            val thumbUrl = if (msg.thumbnailBlur != null && !msg.thumbnailBlur!!.contains("dur:")) msg.thumbnailBlur else msg.attachmentUrl
+            val rawThumb = if (msg.thumbnailBlur != null && msg.thumbnailBlur!!.contains(";dur:")) {
+                msg.thumbnailBlur!!.substringBefore(";dur:")
+            } else if (msg.thumbnailBlur != null && !msg.thumbnailBlur!!.startsWith("dur:")) {
+                msg.thumbnailBlur
+            } else {
+                null
+            }
+            val thumbUrl = if (!rawThumb.isNullOrEmpty()) rawThumb else msg.attachmentUrl
             Glide.with(context)
                 .load(thumbUrl)
                 .centerCrop()

@@ -11,6 +11,8 @@
         android:layout_width="0dp"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/surface"
+        app:contentInsetStart="0dp"
+        app:contentInsetEnd="0dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -19,46 +21,102 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp">
 
             <ImageView
                 android:id="@+id/btnBack"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@android:drawable/ic_menu_revert"
-                app:tint="@color/text_primary" />
-
-            <de.hdodenhof.circleimageview.CircleImageView
-                android:id="@+id/ivRecipientAvatar"
                 android:layout_width="38dp"
                 android:layout_height="38dp"
-                android:layout_marginStart="10dp"
-                android:src="@android:drawable/sym_def_app_icon" />
+                android:padding="8dp"
+                android:src="@android:drawable/ic_menu_revert"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="@color/text_primary" />
 
+            <!-- Clickable Profile Header Area -->
             <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:orientation="vertical">
+                android:id="@+id/layoutToolbarProfileHeader"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="6dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true">
 
-                <TextView
-                    android:id="@+id/tvRecipientName"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="User"
-                    android:textColor="@color/text_primary"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                <FrameLayout
+                    android:layout_width="40dp"
+                    android:layout_height="40dp">
 
-                <TextView
-                    android:id="@+id/tvPresence"
-                    android:layout_width="wrap_content"
+                    <de.hdodenhof.circleimageview.CircleImageView
+                        android:id="@+id/ivRecipientAvatar"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@android:drawable/sym_def_app_icon" />
+
+                    <View
+                        android:id="@+id/viewOnlineDot"
+                        android:layout_width="11dp"
+                        android:layout_height="11dp"
+                        android:layout_gravity="bottom|end"
+                        android:background="@drawable/circle_avatar_bg"
+                        android:backgroundTint="@color/ticks_sent"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="online"
-                    android:textColor="@color/accent_amber"
-                    android:textSize="12sp" />
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvRecipientName"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="User"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:singleLine="true"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/tvPresence"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="offline"
+                        android:textColor="@color/text_muted"
+                        android:textSize="12sp"
+                        android:singleLine="true" />
+
+                </LinearLayout>
 
             </LinearLayout>
+
+            <!-- Action: Search in Conversation -->
+            <ImageView
+                android:id="@+id/btnSearchChat"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_search"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="@color/text_primary" />
+
+            <!-- Action: View Full Contact Profile -->
+            <ImageView
+                android:id="@+id/btnInfoProfile"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_info"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                app:tint="@color/text_primary" />
 
         </LinearLayout>
 

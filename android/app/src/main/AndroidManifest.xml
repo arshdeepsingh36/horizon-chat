@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.chatapp.horizon">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -32,7 +33,7 @@
         </provider>
 
         <activity
-            android:name=".ui.AuthActivity"
+            android:name="com.chatapp.horizon.ui.AuthActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -42,32 +43,32 @@
         </activity>
 
         <activity
-            android:name=".ui.ChatListActivity"
-            android:exported="false" />
+            android:name="com.chatapp.horizon.ui.ChatListActivity"
+            android:exported="true" />
 
         <activity
-            android:name=".ui.ChatActivity"
+            android:name="com.chatapp.horizon.ui.ChatActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
-            android:name=".ui.ProfileActivity"
+            android:name="com.chatapp.horizon.ui.ProfileActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
-            android:name=".ui.UserProfileActivity"
+            android:name="com.chatapp.horizon.ui.UserProfileActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
-            android:name=".ui.VideoPlayerActivity"
+            android:name="com.chatapp.horizon.ui.VideoPlayerActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="sensor" />
 
         <activity
-            android:name=".ui.PhotoViewerActivity"
+            android:name="com.chatapp.horizon.ui.PhotoViewerActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="sensor" />
