@@ -9,9 +9,9 @@
 - [x] Task 2.2: Convert message/last seen timestamps from server UTC to device local time
 
 ## Step 3: Video Picker & Camera Capture
-- [ ] Task 3.1: Update media picker filter to allow video selection alongside images
-- [ ] Task 3.2: Wire native camera intent to record video instead of sending text label "Video"
-- [ ] Task 3.3: Render video message bubbles with thumbnail and fullscreen video player
+- [x] Task 3.1: Update media picker filter to allow video selection alongside images
+- [x] Task 3.2: Wire native camera intent to record video instead of sending text label "Video"
+- [x] Task 3.3: Render video message bubbles with thumbnail and fullscreen video player
 
 ## Step 4: User Profile Screen
 - [ ] Task 4.1: Make chat header (avatar and name) navigate to UserProfileScreen
