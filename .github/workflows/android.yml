@@ -56,14 +56,14 @@ jobs:
           cd $GITHUB_WORKSPACE
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan apk-dist
-          git rm -rf .
+          git checkout -B apk-dist
+          git rm -rf . || true
           cp /tmp/dist/app-debug.apk ./app-debug.apk
           cp /tmp/dist/app-debug.b64 ./app-debug.b64
           cp /tmp/dist/temp_url.txt ./temp_url.txt
           git add -f app-debug.apk app-debug.b64 temp_url.txt
           git commit -m "deploy: update fresh app-debug.apk [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
-          git push -f origin apk-dist
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" apk-dist
 
       - name: Report Build Error
         if: failure()
@@ -74,7 +74,7 @@ jobs:
           cp build.log error.txt || true
           git add -f error.txt
           git commit -m "ci: dump full build log"
-          git push -f origin build-error-log
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" build-error-log
 
       - name: Publish Release Asset (Optional)
         continue-on-error: true
