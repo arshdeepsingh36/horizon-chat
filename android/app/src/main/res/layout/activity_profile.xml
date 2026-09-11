@@ -64,7 +64,7 @@
                     android:layout_gravity="center"
                     android:background="@drawable/circle_avatar_bg"
                     android:scaleType="centerCrop"
-                    android:src="@drawable/ic_launcher" />
+                    android:src="@mipmap/ic_launcher" />
 
                 <TextView
                     android:id="@+id/tvAvatarInitials"
