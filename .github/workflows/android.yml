@@ -42,7 +42,8 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace > ../build.log 2>&1 || (echo "=== COMPILATION ERROR DUMP ===" && tail -n 100 ../build.log && exit 1)
+
 
       - name: Show Generated APK Files
         run: |
