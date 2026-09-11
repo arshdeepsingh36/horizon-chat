@@ -129,6 +129,24 @@ async function runTests() {
     console.log('Message count after clear:', msgsAfter.length);
     if (msgsAfter.length !== 0) throw new Error('Conversation was not cleared');
 
+    // 7. Test Video Messaging Attachment
+    console.log('\n7. Testing Video Message Pipeline...');
+    const videoMsg = await saveMessageTRD({
+        senderId: userA.id,
+        recipientId: userB.id,
+        text: '0:25',
+        attachmentType: 'VIDEO',
+        attachmentUrl: '/uploads/vid_test_123.mp4',
+        thumbnailBlur: 'data:image/jpeg;base64,...;dur:0:25',
+        fileSizeBytes: 10485760
+    });
+
+    if (videoMsg.attachmentType === 'VIDEO' && videoMsg.attachmentUrl.endsWith('.mp4') && videoMsg.text === '0:25') {
+        console.log(' Video message saved & retrieved SUCCESS:', videoMsg);
+    } else {
+        throw new Error('Video message verification failed');
+    }
+
     console.log('\n ALL PHASE 2B DATABASE & BACKEND TESTS PASSED SUCCESSFULLY! ');
     process.exit(0);
 }

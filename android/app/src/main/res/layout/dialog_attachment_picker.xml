@@ -23,14 +23,16 @@
         android:textSize="18sp"
         android:layout_marginBottom="16dp" />
 
+    <!-- 2-row / 3-column Grid for clean, distinct media choices -->
     <GridLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:columnCount="4"
+        android:columnCount="3"
+        android:rowCount="2"
         android:alignmentMode="alignMargins"
         android:layout_gravity="center_horizontal">
 
-        <!-- 1. Gallery -->
+        <!-- 1. Photo Gallery -->
         <LinearLayout
             android:id="@+id/btnOptionGallery"
             android:layout_width="0dp"
@@ -38,6 +40,7 @@
             android:layout_columnWeight="1"
             android:gravity="center"
             android:orientation="vertical"
+            android:padding="8dp"
             android:clickable="true"
             android:focusable="true">
 
@@ -53,14 +56,107 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Gallery"
+                android:text="Photo"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
                 android:layout_marginTop="6dp" />
 
         </LinearLayout>
 
-        <!-- 2. Voice Note -->
+        <!-- 2. Video Gallery / Record -->
+        <LinearLayout
+            android:id="@+id/btnOptionVideo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="54dp"
+                android:layout_height="54dp"
+                android:background="@drawable/circle_avatar_bg"
+                android:backgroundTint="#24334D"
+                android:src="@drawable/ic_video_play_badge"
+                android:padding="13dp"
+                app:tint="#F59E0B" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Video"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="6dp" />
+
+        </LinearLayout>
+
+        <!-- 3. Document -->
+        <LinearLayout
+            android:id="@+id/btnOptionDocument"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="54dp"
+                android:layout_height="54dp"
+                android:background="@drawable/circle_avatar_bg"
+                android:backgroundTint="#24334D"
+                android:src="@drawable/ic_horizon_doc_badge"
+                android:padding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Document"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="6dp" />
+
+        </LinearLayout>
+
+        <!-- 4. Camera -->
+        <LinearLayout
+            android:id="@+id/btnOptionCamera"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:layout_marginTop="12dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="54dp"
+                android:layout_height="54dp"
+                android:background="@drawable/circle_avatar_bg"
+                android:backgroundTint="#24334D"
+                android:src="@drawable/ic_camera"
+                android:padding="13dp"
+                app:tint="#10B981" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Camera"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:layout_marginTop="6dp" />
+
+        </LinearLayout>
+
+        <!-- 5. Voice Note Guidance -->
         <LinearLayout
             android:id="@+id/btnOptionVoice"
             android:layout_width="0dp"
@@ -68,6 +164,8 @@
             android:layout_columnWeight="1"
             android:gravity="center"
             android:orientation="vertical"
+            android:padding="8dp"
+            android:layout_marginTop="12dp"
             android:clickable="true"
             android:focusable="true">
 
@@ -90,7 +188,7 @@
 
         </LinearLayout>
 
-        <!-- 3. Location -->
+        <!-- 6. Location -->
         <LinearLayout
             android:id="@+id/btnOptionLocation"
             android:layout_width="0dp"
@@ -98,6 +196,8 @@
             android:layout_columnWeight="1"
             android:gravity="center"
             android:orientation="vertical"
+            android:padding="8dp"
+            android:layout_marginTop="12dp"
             android:clickable="true"
             android:focusable="true">
 
@@ -120,35 +220,6 @@
 
         </LinearLayout>
 
-        <!-- 4. Document -->
-        <LinearLayout
-            android:id="@+id/btnOptionDocument"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:clickable="true"
-            android:focusable="true">
-
-            <ImageView
-                android:layout_width="54dp"
-                android:layout_height="54dp"
-                android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
-                android:src="@drawable/ic_horizon_doc_badge"
-                android:padding="8dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Document"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp"
-                android:layout_marginTop="6dp" />
-
-        </LinearLayout>
-
     </GridLayout>
 
     <!-- View-Once Ephemeral Toggle -->
@@ -160,7 +231,7 @@
         android:gravity="center_vertical"
         android:background="@drawable/input_bg"
         android:padding="12dp"
-        android:layout_marginTop="20dp">
+        android:layout_marginTop="16dp">
 
         <ImageView
             android:id="@+id/ivToggleIcon"

@@ -355,15 +355,26 @@ export default function HorizonChatView({
         const mediaData = await res.json();
         const finalUrl = mediaData?.attachmentUrl || base64;
 
+        let attachmentType = 'IMAGE';
+        if (file.type.startsWith('video/')) {
+          attachmentType = 'VIDEO';
+        } else if (file.type.startsWith('audio/')) {
+          attachmentType = 'AUDIO';
+        } else if (file.type.startsWith('image/')) {
+          attachmentType = 'IMAGE';
+        } else {
+          attachmentType = 'DOCUMENT';
+        }
+
         const optimisticId = Date.now();
         const optimisticMsg = {
           id: optimisticId,
           senderId: Number(user.id),
           recipientId: Number(partner.id),
-          text: file.name || 'Photo',
-          attachmentType: 'IMAGE',
+          text: file.name || (attachmentType === 'VIDEO' ? 'Video' : 'Attachment'),
+          attachmentType,
           attachmentUrl: finalUrl,
-          thumbnailBlur: mediaData?.thumbnailBlur || base64,
+          thumbnailBlur: mediaData?.thumbnailBlur || (attachmentType === 'IMAGE' ? base64 : null),
           fileSizeBytes: file.size,
           status: isPartnerOnline ? 'DELIVERED' : 'SENT',
           createdAt: new Date().toISOString()
@@ -378,10 +389,10 @@ export default function HorizonChatView({
           'send_message',
           {
             recipientId: partner.id,
-            text: file.name || 'Photo',
-            attachmentType: 'IMAGE',
+            text: file.name || (attachmentType === 'VIDEO' ? 'Video' : 'Attachment'),
+            attachmentType,
             attachmentUrl: finalUrl,
-            thumbnailBlur: mediaData?.thumbnailBlur || base64,
+            thumbnailBlur: mediaData?.thumbnailBlur || (attachmentType === 'IMAGE' ? base64 : null),
             fileSizeBytes: file.size
           },
           (response) => {
@@ -729,7 +740,7 @@ export default function HorizonChatView({
           type="file"
           ref={fileInputRef}
           onChange={handleFileChange}
-          accept="image/*"
+          accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt"
           style={{ display: 'none' }}
         />
 

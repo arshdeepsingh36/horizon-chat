@@ -796,6 +796,9 @@ class ChatActivity : AppCompatActivity() {
 
     private fun handleCapturedVideo(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@ChatActivity, "Processing and uploading video...", Toast.LENGTH_SHORT).show()
+            }
             try {
                 var durationMs = 0L
                 var thumbBase64: String? = null
@@ -831,10 +834,20 @@ class ChatActivity : AppCompatActivity() {
                     return@launch
                 }
 
+                val tempId = System.currentTimeMillis()
+                // Cache video locally for instant playback
+                try {
+                    val videoDir = File(cacheDir, "video_cache").apply { mkdirs() }
+                    val localCopy = File(videoDir, "vid_${tempId}.mp4")
+                    localCopy.writeBytes(bytes)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
                 val base64 = "data:video/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val uploadReq = MediaUploadRequest(
                     imageBase64 = base64,
-                    fileName = "video_${System.currentTimeMillis()}.mp4",
+                    fileName = "video_${tempId}.mp4",
                     fileSizeBytes = bytes.size.toLong(),
                     thumbnailBlur = thumbBase64
                 )
@@ -856,7 +869,8 @@ class ChatActivity : AppCompatActivity() {
                         attachmentUrl = finalUrl,
                         thumbnailBlur = metaThumb,
                         fileSizeBytes = bytes.size.toLong(),
-                        isViewOnce = viewOnce
+                        isViewOnce = viewOnce,
+                        preassignedTempId = tempId
                     )
                 }
             } catch (e: Exception) {
@@ -883,28 +897,59 @@ class ChatActivity : AppCompatActivity() {
             updateViewOnceToggleUI()
         }
 
-        // 1. Gallery
+        // 1. Photo Gallery
         sheetBinding.btnOptionGallery.setOnClickListener {
             bottomSheet.dismiss()
             imagePickerLauncher.launch("image/*")
         }
 
-        // 2. Voice Note Guidance
+        // 2. Video Gallery / Picker
+        sheetBinding.btnOptionVideo.setOnClickListener {
+            bottomSheet.dismiss()
+            val choices = arrayOf("📁 Choose Video from Gallery", "🎥 Record Video with Camera")
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Send Video")
+                .setItems(choices) { _, which ->
+                    when (which) {
+                        0 -> videoPickerLauncher.launch("video/*")
+                        1 -> {
+                            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            } else {
+                                launchNativeCameraVideo()
+                            }
+                        }
+                    }
+                }
+                .show()
+        }
+
+        // 3. Document
+        sheetBinding.btnOptionDocument.setOnClickListener {
+            bottomSheet.dismiss()
+            documentPickerLauncher.launch("*/*")
+        }
+
+        // 4. Camera (Photo or Video)
+        sheetBinding.btnOptionCamera.setOnClickListener {
+            bottomSheet.dismiss()
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            } else {
+                openCameraChoiceDialog()
+            }
+        }
+
+        // 5. Voice Note Guidance
         sheetBinding.btnOptionVoice.setOnClickListener {
             bottomSheet.dismiss()
             Toast.makeText(this, "Hold the mic icon on the bottom right to record voice notes", Toast.LENGTH_LONG).show()
         }
 
-        // 3. Location
+        // 6. Location
         sheetBinding.btnOptionLocation.setOnClickListener {
             bottomSheet.dismiss()
             sendLocation()
-        }
-
-        // 4. Document
-        sheetBinding.btnOptionDocument.setOnClickListener {
-            bottomSheet.dismiss()
-            documentPickerLauncher.launch("*/*")
         }
 
         bottomSheet.show()

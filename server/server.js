@@ -62,7 +62,8 @@ const app = express();
 const server = http.createServer(app);
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT'] }));
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express.static(uploadsDir));
 
 // In-Memory Socket Map: userId (Int) -> Set<socket.id>
@@ -455,12 +456,14 @@ app.post('/api/media/upload', authenticateToken, async (req, res) => {
       let ext = 'jpg';
       if (matches && matches.length === 3) {
         const mime = matches[1].toLowerCase();
-        if (mime.includes('png')) ext = 'png';
+        if (mime.includes('video') || mime.includes('mp4')) ext = 'mp4';
+        else if (mime.includes('png')) ext = 'png';
         else if (mime.includes('webp')) ext = 'webp';
-        else if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+        else if (mime.includes('audio') || mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
         else if (mime.includes('ogg')) ext = 'ogg';
-        else if (mime.includes('webm')) ext = 'webm';
+        else if (mime.includes('webm')) ext = mime.includes('video') ? 'webm' : 'weba';
         else if (mime.includes('wav')) ext = 'wav';
+        else if (mime.includes('pdf')) ext = 'pdf';
         buffer = Buffer.from(matches[2], 'base64');
       } else {
         const cleanBase64 = imageBase64.includes('base64,') ? imageBase64.split('base64,')[1] : imageBase64;
@@ -496,9 +499,10 @@ app.post('/api/media/upload', authenticateToken, async (req, res) => {
   }
 });
 
-// Initialize Socket.io
+// Initialize Socket.io with 100MB buffer
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  maxHttpBufferSize: 1e8
 });
 
 // WebSocket Handshake (TRD Section 4.1)
@@ -518,71 +522,75 @@ io.on('connection', (socket) => {
 
   if (!onlineUsers.has(userId)) {
     onlineUsers.set(userId, new Set());
+    console.log(`[SOCKET CONNECT] User @${socket.user.username} (ID: ${userId}) connected.`);
+    socket.broadcast.emit('user_status_changed', { userId, status: 'online' });
   }
   onlineUsers.get(userId).add(socket.id);
-  console.log(`[SOCKET CONNECT] User @${socket.user.username} (ID: ${userId}). Total online: ${onlineUsers.size}`);
 
-  // Broadcast user_status_changed (online)
-  socket.broadcast.emit('user_status_changed', {
+  socket.emit('connection_ack', {
+    status: 'connected',
     userId,
-    status: 'online'
+    username: socket.user.username,
+    socketId: socket.id
   });
 
-  // Outbound Message Event (TRD Section 4.2 + Phase 2)
-  socket.on('send_message', async (data, callback) => {
-    const { 
-      recipientId, 
-      text, 
-      attachmentType = 'NONE', 
-      attachmentUrl = null, 
-      thumbnailBlur = null, 
-      fileSizeBytes = 0, 
+  // Handle Send Message (TRD Section 4.2 & Phase 2)
+  socket.on('send_message', async (payload, callback) => {
+    const {
+      recipientId,
+      text,
+      attachmentType = 'NONE',
+      attachmentUrl = null,
+      thumbnailBlur = null,
+      fileSizeBytes = 0,
       isViewOnce = false,
-      replyToId = null 
-    } = data || {};
-
-    if (!recipientId || (!text && !attachmentUrl)) return;
+      replyToId = null
+    } = payload || {};
 
     const rId = Number(recipientId);
+    if (!rId) {
+      if (typeof callback === 'function') callback({ success: false, error: 'Recipient ID is required' });
+      return;
+    }
 
-    // Block check
+    // Communication Block Enforcement
     try {
       const blocked = await isUserBlocked(userId, rId);
       if (blocked) {
-        if (typeof callback === 'function') {
-          callback({ success: false, error: 'Communication blocked between users.' });
-        }
+        if (typeof callback === 'function') callback({ success: false, error: 'Cannot send message to this user' });
         return;
       }
-    } catch (err) {
-      console.error('[BLOCK CHECK ERROR]', err);
+    } catch (e) {
+      console.error('[BLOCK CHECK ERROR]', e);
     }
 
     const recipientOnline = isUserOnline(rId);
     const initialStatus = recipientOnline ? 'DELIVERED' : 'SENT';
 
-    // Auto-save direct Base64 Data URL to uploads directory (Images and Audio)
+    // Auto-save direct Base64 Data URL to uploads directory (Images, Audio, and Video)
     let finalAttachmentUrl = attachmentUrl;
-    if (attachmentUrl && typeof attachmentUrl === 'string' && (attachmentUrl.startsWith('data:image/') || attachmentUrl.startsWith('data:audio/'))) {
+    if (attachmentUrl && typeof attachmentUrl === 'string' && (attachmentUrl.startsWith('data:image/') || attachmentUrl.startsWith('data:audio/') || attachmentUrl.startsWith('data:video/'))) {
       try {
+        const isVideo = attachmentUrl.startsWith('data:video/');
         const isAudio = attachmentUrl.startsWith('data:audio/');
         const matches = attachmentUrl.match(/^data:([A-Za-z0-9\-\+\.\/]+);base64,(.+)$/s);
-        let ext = isAudio ? 'm4a' : 'jpg';
+        let ext = isVideo ? 'mp4' : (isAudio ? 'm4a' : 'jpg');
         let buf;
         if (matches && matches.length === 3) {
           const mime = matches[1].toLowerCase();
-          if (mime.includes('png')) ext = 'png';
+          if (mime.includes('video') || mime.includes('mp4')) ext = 'mp4';
+          else if (mime.includes('png')) ext = 'png';
           else if (mime.includes('webp')) ext = 'webp';
-          else if (mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
+          else if (mime.includes('audio') || mime.includes('m4a') || mime.includes('aac')) ext = 'm4a';
           else if (mime.includes('ogg')) ext = 'ogg';
-          else if (mime.includes('webm')) ext = 'webm';
+          else if (mime.includes('webm')) ext = mime.includes('video') ? 'webm' : 'weba';
           else if (mime.includes('wav')) ext = 'wav';
           buf = Buffer.from(matches[2], 'base64');
         } else {
           const cleanBase64 = attachmentUrl.includes('base64,') ? attachmentUrl.split('base64,')[1] : attachmentUrl;
           buf = Buffer.from(cleanBase64, 'base64');
         }
-        const prefix = isAudio ? 'voice' : 'img';
+        const prefix = isVideo ? 'vid' : (isAudio ? 'voice' : 'img');
         const uniqueName = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
         fs.writeFileSync(path.join(uploadsDir, uniqueName), buf);
         const serverHost = process.env.RENDER_EXTERNAL_URL || 'https://horizon-chat-1.onrender.com';

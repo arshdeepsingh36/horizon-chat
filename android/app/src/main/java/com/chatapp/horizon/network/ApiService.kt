@@ -106,7 +106,8 @@ object ApiClient {
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS) // 60s cold start timeout (Rules Section 1)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
         .addInterceptor(loggingInterceptor)
         .build()
 
