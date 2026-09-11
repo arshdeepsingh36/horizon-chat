@@ -69,6 +69,8 @@ export default function HorizonChatView({
   const [playingVoiceId, setPlayingVoiceId] = useState(null);
   const [voiceProgress, setVoiceProgress] = useState(0);
   const [lightboxMedia, setLightboxMedia] = useState(null); // { type: 'IMAGE'|'VIDEO', url, title, sender, timestamp, caption }
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState('media'); // 'media' | 'docs' | 'links'
   const activeAudioRef = useRef(null);
 
   const canvasRef = useRef(null);
@@ -449,7 +451,12 @@ export default function HorizonChatView({
             <ArrowLeft size={20} />
           </button>
 
-          <div className="horizon-partner-info">
+          <div
+            className="horizon-partner-info"
+            onClick={() => setShowProfileModal(true)}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 8px', borderRadius: '8px', transition: 'background 0.2s' }}
+            title="View Contact Profile"
+          >
             <div
               className={`horizon-cell-avatar ${isPartnerOnline ? 'online' : ''}`}
               style={{ width: '38px', height: '38px', fontSize: '14px' }}
@@ -933,6 +940,285 @@ export default function HorizonChatView({
               {lightboxMedia.caption}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Dedicated User Profile Modal / Drawer */}
+      {showProfileModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9998,
+            backgroundColor: 'rgba(10, 15, 29, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px'
+          }}
+          onClick={() => setShowProfileModal(false)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '440px',
+              maxHeight: '90vh',
+              backgroundColor: '#1E293B',
+              borderRadius: '16px',
+              border: '1px solid rgba(255,255,255,0.1)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 20px',
+                borderBottom: '1px solid rgba(255,255,255,0.08)'
+              }}
+            >
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#F8FAFC' }}>
+                Contact Info
+              </div>
+              <button
+                onClick={() => setShowProfileModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94A3B8',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Profile Card */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                <div
+                  style={{
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #F59E0B, #EA580C)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '28px',
+                    fontWeight: 700,
+                    color: '#fff',
+                    marginBottom: '12px'
+                  }}
+                >
+                  {(partner.username || 'User').slice(0, 2).toUpperCase()}
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: '#F8FAFC' }}>
+                  @{partner.username}
+                </div>
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginTop: '6px',
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    backgroundColor: isPartnerOnline ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                    color: isPartnerOnline ? '#10B981' : '#94A3B8',
+                    fontSize: '12px',
+                    fontWeight: 600
+                  }}
+                >
+                  <span
+                    style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: isPartnerOnline ? '#10B981' : '#94A3B8'
+                    }}
+                  />
+                  {isPartnerOnline ? 'Online' : 'Offline'}
+                </div>
+                <div style={{ fontSize: '13px', color: '#94A3B8', marginTop: '10px' }}>
+                  Hey there! I am using Horizon Chat.
+                </div>
+              </div>
+
+              {/* Repository Tabs */}
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: 700, color: '#F8FAFC', marginBottom: '10px' }}>
+                  Shared Repository
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    borderRadius: '8px',
+                    backgroundColor: '#0F172A',
+                    padding: '3px',
+                    marginBottom: '12px'
+                  }}
+                >
+                  {['media', 'docs', 'links'].map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveProfileTab(tab)}
+                      style={{
+                        flex: 1,
+                        padding: '8px',
+                        border: 'none',
+                        borderRadius: '6px',
+                        backgroundColor: activeProfileTab === tab ? '#F59E0B' : 'transparent',
+                        color: activeProfileTab === tab ? '#000' : '#94A3B8',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        textTransform: 'capitalize',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tab Content */}
+                {activeProfileTab === 'media' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                    {messages.filter(m => m.attachmentType === 'IMAGE' || m.attachmentType === 'VIDEO').length === 0 ? (
+                      <div style={{ gridColumn: 'span 3', textAlign: 'center', padding: '20px', color: '#94A3B8', fontSize: '13px' }}>
+                        No shared photos or videos yet
+                      </div>
+                    ) : (
+                      messages.filter(m => m.attachmentType === 'IMAGE' || m.attachmentType === 'VIDEO').map(m => (
+                        <div
+                          key={m.id}
+                          onClick={() => {
+                            setShowProfileModal(false);
+                            setLightboxMedia({
+                              type: m.attachmentType,
+                              url: m.attachmentUrl || m.thumbnailBlur,
+                              title: `${m.attachmentType === 'VIDEO' ? 'Video' : 'Photo'} from @${m.senderId === user.id ? 'You' : partner.username}`,
+                              subtitle: formatMessageTime(m.createdAt),
+                              caption: m.text
+                            });
+                          }}
+                          style={{
+                            aspectRatio: '1',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            backgroundColor: '#0F172A',
+                            cursor: 'pointer',
+                            position: 'relative'
+                          }}
+                        >
+                          {m.attachmentType === 'VIDEO' ? (
+                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                              <Film size={24} color="#F59E0B" />
+                            </div>
+                          ) : (
+                            <img
+                              src={m.attachmentUrl || m.thumbnailBlur}
+                              alt="media thumbnail"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {activeProfileTab === 'docs' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {messages.filter(m => m.attachmentType === 'DOCUMENT').length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '20px', color: '#94A3B8', fontSize: '13px' }}>
+                        No shared documents yet
+                      </div>
+                    ) : (
+                      messages.filter(m => m.attachmentType === 'DOCUMENT').map(m => (
+                        <div
+                          key={m.id}
+                          onClick={() => {
+                            if (m.attachmentUrl) window.open(m.attachmentUrl, '_blank');
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#0F172A',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <FileText size={20} color="#F59E0B" />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: '13px', color: '#F8FAFC', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {m.text || 'Document.pdf'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                              {formatFileSize(m.fileSizeBytes)}
+                            </div>
+                          </div>
+                          <Download size={16} color="#94A3B8" />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {activeProfileTab === 'links' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {messages.filter(m => /https?:\/\/[^\s]+/.test(m.text || '')).length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '20px', color: '#94A3B8', fontSize: '13px' }}>
+                        No shared links found in conversation
+                      </div>
+                    ) : (
+                      messages.filter(m => /https?:\/\/[^\s]+/.test(m.text || '')).map(m => {
+                        const match = (m.text || '').match(/https?:\/\/[^\s]+/);
+                        const url = match ? match[0] : '';
+                        return (
+                          <a
+                            key={m.id}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              backgroundColor: '#0F172A',
+                              color: '#38BDF8',
+                              textDecoration: 'none',
+                              fontSize: '13px',
+                              overflow: 'hidden'
+                            }}
+                          >
+                            <ExternalLink size={16} style={{ flexShrink: 0 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {url}
+                            </span>
+                          </a>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

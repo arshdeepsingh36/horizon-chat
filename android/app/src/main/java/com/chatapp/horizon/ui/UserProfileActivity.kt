@@ -530,19 +530,29 @@ class UserProfileActivity : AppCompatActivity() {
     }
 
     private fun openDocumentFile(msg: ChatMessage) {
-        val docName = if (!msg.messageText.isNullOrEmpty()) msg.messageText!! else "Document.pdf"
+        val docName = if (!msg.messageText.isNullOrEmpty()) msg.messageText!! else "document_${msg.id}.pdf"
         val docsDir = File(cacheDir, "documents").apply { mkdirs() }
         val localFile = File(docsDir, docName)
 
+        val url = msg.attachmentUrl
+        if (url.isNullOrEmpty()) {
+            Toast.makeText(this, "Document not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                if (!localFile.exists()) {
-                    if (!msg.attachmentUrl.isNullOrEmpty() && msg.attachmentUrl!!.startsWith("http")) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@UserProfileActivity, "Downloading $docName...", Toast.LENGTH_SHORT).show()
-                        }
+                if (!localFile.exists() || localFile.length() == 0L) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@UserProfileActivity, "Downloading $docName...", Toast.LENGTH_SHORT).show()
+                    }
+                    if (url.startsWith("data:")) {
+                        val cleanBase64 = if (url.contains("base64,")) url.substringAfter("base64,") else url
+                        val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                        FileOutputStream(localFile).use { it.write(bytes) }
+                    } else if (url.startsWith("http")) {
                         val client = OkHttpClient()
-                        val request = Request.Builder().url(msg.attachmentUrl!!).build()
+                        val request = Request.Builder().url(url).build()
                         val response = client.newCall(request).execute()
                         if (response.isSuccessful && response.body != null) {
                             FileOutputStream(localFile).use { it.write(response.body!!.bytes()) }
@@ -553,21 +563,28 @@ class UserProfileActivity : AppCompatActivity() {
                 }
 
                 withContext(Dispatchers.Main) {
-                    try {
-                        val contentUri = FileProvider.getUriForFile(this@UserProfileActivity, "${packageName}.fileprovider", localFile)
-                        val ext = MimeTypeMap.getFileExtensionFromUrl(localFile.name)
-                        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(contentUri, mimeType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (localFile.exists() && localFile.length() > 0) {
+                        try {
+                            val contentUri = FileProvider.getUriForFile(this@UserProfileActivity, "${packageName}.fileprovider", localFile)
+                            val ext = MimeTypeMap.getFileExtensionFromUrl(localFile.name).ifEmpty { localFile.extension }
+                            val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.lowercase()) ?: "*/*"
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(contentUri, mimeType)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(Intent.createChooser(intent, "Open $docName"))
+                        } catch (e: Exception) {
+                            Toast.makeText(this@UserProfileActivity, "Saved document: ${localFile.name}", Toast.LENGTH_LONG).show()
                         }
-                        startActivity(intent)
-                    } catch (e: Exception) {
-                        Toast.makeText(this@UserProfileActivity, "Saved document: ${localFile.name}", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this@UserProfileActivity, "Failed to download document", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@UserProfileActivity, "Error opening document: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }

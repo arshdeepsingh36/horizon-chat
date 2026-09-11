@@ -219,6 +219,7 @@ class ChatActivity : AppCompatActivity() {
         binding.layoutToolbarProfileHeader.setOnClickListener(openProfileListener)
         binding.ivRecipientAvatar.setOnClickListener(openProfileListener)
         binding.tvRecipientName.setOnClickListener(openProfileListener)
+        binding.tvPresence.setOnClickListener(openProfileListener)
         binding.btnInfoProfile.setOnClickListener(openProfileListener)
 
         // Toolbar In-Chat Search Button Toggle
@@ -682,68 +683,7 @@ class ChatActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ====================================================
-    // 2b. NATIVE DOCUMENT VIEWER VIA FILEPROVIDER
-    // ====================================================
-    private fun openDocumentFile(msg: ChatMessage) {
-        val docName = if (!msg.messageText.isNullOrEmpty()) msg.messageText!! else "Document.pdf"
-        val docsDir = File(cacheDir, "documents").apply { mkdirs() }
-        val localFile = File(docsDir, docName)
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                if (!localFile.exists()) {
-                    if (!msg.attachmentUrl.isNullOrEmpty() && msg.attachmentUrl!!.startsWith("http")) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@ChatActivity, "Downloading $docName...", Toast.LENGTH_SHORT).show()
-                        }
-                        val client = OkHttpClient()
-                        val request = Request.Builder().url(msg.attachmentUrl!!).build()
-                        val response = client.newCall(request).execute()
-                        if (response.isSuccessful && response.body != null) {
-                            FileOutputStream(localFile).use { it.write(response.body!!.bytes()) }
-                        }
-                    } else {
-                        // Generate sample document payload for local verification
-                        localFile.writeText("Horizon Chat Document: $docName\nCreated for demonstration.")
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    try {
-                        val contentUri = FileProvider.getUriForFile(
-                            this@ChatActivity,
-                            "${packageName}.fileprovider",
-                            localFile
-                        )
-                        val ext = MimeTypeMap.getFileExtensionFromUrl(localFile.name)
-                        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(contentUri, mimeType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        startActivity(intent)
-                    } catch (e: Exception) {
-                        Toast.makeText(this@ChatActivity, "Document saved: ${localFile.name}", Toast.LENGTH_LONG).show()
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "Failed to open document: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun launchVideoPlayer(msg: ChatMessage) {
-        val intent = Intent(this, VideoPlayerActivity::class.java).apply {
-            putExtra("VIDEO_URL", msg.attachmentUrl)
-            putExtra("VIDEO_TITLE", msg.messageText ?: "Video")
-        }
-        startActivity(intent)
-    }
 
     private fun renderToolbarAvatar() {
         if (!targetAvatarUrl.isNullOrEmpty()) {
@@ -1619,27 +1559,73 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun openDocumentFile(docMsg: ChatMessage) {
-        val url = docMsg.attachmentUrl ?: return
-        try {
-            if (url.startsWith("file://") || url.startsWith("/")) {
-                val file = File(url.removePrefix("file://"))
-                val uri = FileProvider.getUriForFile(this, "${applicationContext.packageName}.fileprovider", file)
-                val ext = MimeTypeMap.getFileExtensionFromUrl(file.name)
-                val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, mimeType)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val url = docMsg.attachmentUrl
+        val docName = if (!docMsg.messageText.isNullOrEmpty()) docMsg.messageText!! else "document_${docMsg.id}.pdf"
+        val docsDir = File(cacheDir, "documents").apply { mkdirs() }
+        val localFile = File(docsDir, docName)
+
+        if (url.isNullOrEmpty()) {
+            Toast.makeText(this, "Document not available", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                if (!localFile.exists() || localFile.length() == 0L) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@ChatActivity, "Downloading $docName...", Toast.LENGTH_SHORT).show()
+                    }
+
+                    if (url.startsWith("data:")) {
+                        val cleanBase64 = if (url.contains("base64,")) url.substringAfter("base64,") else url
+                        val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                        FileOutputStream(localFile).use { it.write(bytes) }
+                    } else if (url.startsWith("http")) {
+                        val client = OkHttpClient()
+                        val request = Request.Builder().url(url).build()
+                        val response = client.newCall(request).execute()
+                        if (response.isSuccessful && response.body != null) {
+                            FileOutputStream(localFile).use { it.write(response.body!!.bytes()) }
+                        }
+                    } else if (url.startsWith("file://") || url.startsWith("/")) {
+                        val srcFile = File(url.removePrefix("file://"))
+                        if (srcFile.exists()) {
+                            srcFile.copyTo(localFile, overwrite = true)
+                        }
+                    } else {
+                        localFile.writeText("Horizon Chat Document: $docName\nTimestamp: ${docMsg.createdAt}")
+                    }
                 }
-                startActivity(Intent.createChooser(intent, "Open Document"))
-            } else {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+                withContext(Dispatchers.Main) {
+                    if (localFile.exists() && localFile.length() > 0) {
+                        try {
+                            val contentUri = FileProvider.getUriForFile(
+                                this@ChatActivity,
+                                "${applicationContext.packageName}.fileprovider",
+                                localFile
+                            )
+                            val ext = MimeTypeMap.getFileExtensionFromUrl(localFile.name).ifEmpty { localFile.extension }
+                            val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.lowercase()) ?: "*/*"
+
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(contentUri, mimeType)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(Intent.createChooser(intent, "Open $docName"))
+                        } catch (e: Exception) {
+                            Toast.makeText(this@ChatActivity, "Saved document: ${localFile.name}", Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        Toast.makeText(this@ChatActivity, "Failed to load document", Toast.LENGTH_SHORT).show()
+                    }
                 }
-                startActivity(intent)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Error opening document: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "Cannot open document: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
