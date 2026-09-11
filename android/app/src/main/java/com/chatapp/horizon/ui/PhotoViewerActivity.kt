@@ -133,6 +133,13 @@ class PhotoViewerActivity : AppCompatActivity() {
         })
 
         binding.ivFullPhoto.scaleType = ImageView.ScaleType.FIT_CENTER
+        binding.ivFullPhoto.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            if (event.action == MotionEvent.ACTION_UP) {
+                toggleControls()
+            }
+            true
+        }
     }
 
     private fun loadPhoto() {
@@ -181,28 +188,17 @@ class PhotoViewerActivity : AppCompatActivity() {
                 }
 
                 // 3. Remote URL
+                val bmp = Glide.with(this@PhotoViewerActivity)
+                    .asBitmap()
+                    .load(photoUrl)
+                    .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .submit()
+                    .get()
+
+                localBitmap = bmp
                 withContext(Dispatchers.Main) {
-                    Glide.with(this@PhotoViewerActivity)
-                        .asBitmap()
-                        .load(photoUrl)
-                        .diskCacheStrategy(DiskCacheStrategy.ALL)
-                        .into(object : com.bumptech.glide.request.target.CustomTarget<Bitmap>() {
-                            override fun onResourceReady(
-                                resource: Bitmap,
-                                transition: com.bumptech.glide.request.transition.Transition<in Bitmap>?
-                            ) {
-                                binding.pbPhotoLoading.visibility = View.GONE
-                                localBitmap = resource
-                                binding.ivFullPhoto.setImageBitmap(resource)
-                            }
-
-                            override fun onLoadCleared(placeholder: android.graphics.drawable.Drawable?) {}
-
-                            override fun onLoadFailed(errorDrawable: android.graphics.drawable.Drawable?) {
-                                binding.pbPhotoLoading.visibility = View.GONE
-                                Toast.makeText(this@PhotoViewerActivity, "Failed to load image", Toast.LENGTH_SHORT).show()
-                            }
-                        })
+                    binding.pbPhotoLoading.visibility = View.GONE
+                    binding.ivFullPhoto.setImageBitmap(bmp)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
