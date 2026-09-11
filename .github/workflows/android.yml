@@ -42,28 +42,19 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build_output.log
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Show Build Log Summary
+      - name: Show Generated APK Files
         run: |
-          echo "=== LAST 40 LINES OF BUILD LOG ==="
-          tail -n 40 android/build_output.log
           echo "=== SEARCHING FOR ALL GENERATED APKS ==="
           find . -name "*.apk"
 
       - name: Prepare Release APK
         run: |
           mkdir -p release_apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk release_apk/app-debug.apk || find . -name "*.apk" -not -path "./release_apk/*" -exec cp {} release_apk/app-debug.apk \;
+          find . -name "*-debug.apk" -not -path "./release_apk/*" -exec cp {} release_apk/app-debug.apk \;
           ls -la release_apk/
 
-      - name: Upload Build Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: horizon-chat-build-log
-          path: android/build_output.log
-          retention-days: 7
 
       - name: Upload Android APK
         if: success()
