@@ -121,6 +121,14 @@ class ChatAdapter(
         }
     }
 
+    fun updateMessageStatus(messageId: Long, status: String) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index].status = status
+            notifyItemChanged(index)
+        }
+    }
+
     fun markMessageViewed(messageId: Long) {
         val index = messages.indexOfFirst { it.id == messageId }
         if (index != -1) {
@@ -617,13 +625,10 @@ class ChatAdapter(
                 params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
                 params.startToStart = ConstraintLayout.LayoutParams.UNSET
                 binding.cardVideo.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_sent))
-                binding.ivTicks.visibility = View.VISIBLE
-                updateTicks(binding.ivTicks, msg.status)
             } else {
                 params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
                 params.endToEnd = ConstraintLayout.LayoutParams.UNSET
                 binding.cardVideo.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_received))
-                binding.ivTicks.visibility = View.GONE
             }
             binding.cardVideo.layoutParams = params
 
@@ -634,6 +639,35 @@ class ChatAdapter(
                 msg.thumbnailBlur!!.substringAfter("dur:")
             } else {
                 "▶ Video"
+            }
+
+            val isUploading = msg.status == "UPLOADING" || msg.status == "PENDING"
+            val isFailed = msg.status == "FAILED"
+
+            if (isUploading) {
+                binding.layoutUploadingOverlay.visibility = View.VISIBLE
+                binding.btnPlayVideoOverlay.visibility = View.GONE
+                binding.tvStatusIndicator.visibility = View.VISIBLE
+                binding.tvStatusIndicator.text = "Uploading..."
+                binding.tvStatusIndicator.setTextColor(ContextCompat.getColor(context, R.color.accent_amber))
+                binding.ivTicks.visibility = View.GONE
+            } else if (isFailed) {
+                binding.layoutUploadingOverlay.visibility = View.GONE
+                binding.btnPlayVideoOverlay.visibility = View.VISIBLE
+                binding.tvStatusIndicator.visibility = View.VISIBLE
+                binding.tvStatusIndicator.text = "Failed"
+                binding.tvStatusIndicator.setTextColor(ContextCompat.getColor(context, R.color.error_red))
+                binding.ivTicks.visibility = View.GONE
+            } else {
+                binding.layoutUploadingOverlay.visibility = View.GONE
+                binding.btnPlayVideoOverlay.visibility = View.VISIBLE
+                binding.tvStatusIndicator.visibility = View.GONE
+                if (isSent) {
+                    binding.ivTicks.visibility = View.VISIBLE
+                    updateTicks(binding.ivTicks, msg.status)
+                } else {
+                    binding.ivTicks.visibility = View.GONE
+                }
             }
 
             val rawThumb = if (msg.thumbnailBlur != null && msg.thumbnailBlur!!.contains(";dur:")) {
@@ -662,15 +696,21 @@ class ChatAdapter(
 
 private fun updateTicks(imageView: ImageView, status: String) {
     when (status) {
+        "UPLOADING", "PENDING" -> {
+            imageView.visibility = View.GONE
+        }
         "READ" -> {
+            imageView.visibility = View.VISIBLE
             imageView.setImageResource(R.drawable.ic_tick_double)
             imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.ticks_read))
         }
         "DELIVERED" -> {
+            imageView.visibility = View.VISIBLE
             imageView.setImageResource(R.drawable.ic_tick_double)
             imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.ticks_sent))
         }
         else -> {
+            imageView.visibility = View.VISIBLE
             imageView.setImageResource(R.drawable.ic_tick_single)
             imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.ticks_sent))
         }

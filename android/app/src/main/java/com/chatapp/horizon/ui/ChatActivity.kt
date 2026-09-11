@@ -791,9 +791,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun handleCapturedVideo(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@ChatActivity, "Processing and uploading video...", Toast.LENGTH_SHORT).show()
-            }
+            var currentTempId = System.currentTimeMillis()
             try {
                 var durationMs = 0L
                 var thumbBase64: String? = null
@@ -822,6 +820,13 @@ class ChatActivity : AppCompatActivity() {
                 val bytes = inputStream?.readBytes() ?: ByteArray(0)
                 inputStream?.close()
 
+                if (bytes.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@ChatActivity, "Could not read video file", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
                 if (bytes.size > 50 * 1024 * 1024) {
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@ChatActivity, "Video exceeds 50MB limit", Toast.LENGTH_SHORT).show()
@@ -829,20 +834,48 @@ class ChatActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val tempId = System.currentTimeMillis()
-                // Cache video locally for instant playback
+                currentTempId = System.currentTimeMillis()
+                val videoDir = File(cacheDir, "video_cache").apply { mkdirs() }
+                val localCopy = File(videoDir, "vid_${currentTempId}.mp4")
                 try {
-                    val videoDir = File(cacheDir, "video_cache").apply { mkdirs() }
-                    val localCopy = File(videoDir, "vid_${tempId}.mp4")
                     localCopy.writeBytes(bytes)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
 
+                val metaThumb = (thumbBase64 ?: "") + ";dur:" + durationText
+                val viewOnce = isViewOnceActive
+
+                // 1. INSTANT OPTIMISTIC VIDEO BUBBLE INSERTION (UPLOADING INDICATOR)
+                val optimisticMsg = ChatMessage(
+                    id = currentTempId,
+                    senderId = currentUserId,
+                    recipientId = targetUserId,
+                    messageText = durationText,
+                    attachmentType = "VIDEO",
+                    attachmentUrl = localCopy.absolutePath,
+                    thumbnailBlur = metaThumb,
+                    fileSizeBytes = bytes.size.toLong(),
+                    status = "UPLOADING",
+                    isViewOnce = viewOnce,
+                    isViewed = false,
+                    createdAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.format(Date())
+                )
+
+                withContext(Dispatchers.Main) {
+                    isViewOnceActive = false
+                    updateViewOnceToggleUI()
+                    adapter.appendMessage(optimisticMsg)
+                    binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
+                }
+
+                // 2. BACKGROUND UPLOAD TO SERVER
                 val base64 = "data:video/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val uploadReq = MediaUploadRequest(
                     imageBase64 = base64,
-                    fileName = "video_${tempId}.mp4",
+                    fileName = "video_${currentTempId}.mp4",
                     fileSizeBytes = bytes.size.toLong(),
                     thumbnailBlur = thumbBase64
                 )
@@ -853,25 +886,42 @@ class ChatActivity : AppCompatActivity() {
                     base64
                 }
 
-                val metaThumb = (thumbBase64 ?: "") + ";dur:" + durationText
-                val viewOnce = isViewOnceActive
-                withContext(Dispatchers.Main) {
-                    isViewOnceActive = false
-                    updateViewOnceToggleUI()
-                    sendMessage(
-                        text = durationText,
-                        attachmentType = "VIDEO",
-                        attachmentUrl = finalUrl,
-                        thumbnailBlur = metaThumb,
-                        fileSizeBytes = bytes.size.toLong(),
-                        isViewOnce = viewOnce,
-                        preassignedTempId = tempId
-                    )
+                // 3. DISPATCH WEBSOCKET MESSAGE & TRANSITION STATUS TO SENT
+                val payload = JSONObject().apply {
+                    put("recipientId", targetUserId)
+                    put("text", durationText)
+                    put("attachmentType", "VIDEO")
+                    put("attachmentUrl", finalUrl)
+                    put("thumbnailBlur", metaThumb)
+                    put("fileSizeBytes", bytes.size.toLong())
+                    put("isViewOnce", viewOnce)
                 }
+
+                mSocket?.emit("send_message", payload, io.socket.client.Ack { ackArgs ->
+                    if (ackArgs.isNotEmpty()) {
+                        val ackObj = ackArgs[0] as? JSONObject
+                        val savedObj = ackObj?.optJSONObject("message")
+                        if (savedObj != null) {
+                            val serverMsg = parseJsonMessage(savedObj)
+                            runOnUiThread {
+                                adapter.updateOptimisticMessage(currentTempId, serverMsg)
+                                try {
+                                    val finalFile = File(videoDir, "vid_${serverMsg.id}.mp4")
+                                    if (localCopy.exists()) {
+                                        localCopy.copyTo(finalFile, overwrite = true)
+                                    }
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }
+                        }
+                    }
+                })
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "Failed to send video: ${e.message}", Toast.LENGTH_SHORT).show()
+                    adapter.updateMessageStatus(currentTempId, "FAILED")
+                    Toast.makeText(this@ChatActivity, "Failed to upload video: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
