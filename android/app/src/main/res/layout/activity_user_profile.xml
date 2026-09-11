@@ -70,7 +70,7 @@
                     android:textSize="36sp"
                     android:textStyle="bold"
                     android:background="@drawable/circle_avatar_bg"
-                    android:visibility="GONE" />
+                    android:visibility="gone" />
 
             </FrameLayout>
 
@@ -296,7 +296,7 @@
                 android:textSize="13sp"
                 android:gravity="center"
                 android:paddingVertical="20dp"
-                android:visibility="GONE" />
+                android:visibility="gone" />
 
         </LinearLayout>
 

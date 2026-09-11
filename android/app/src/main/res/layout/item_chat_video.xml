@@ -52,7 +52,7 @@
                     android:layout_width="36dp"
                     android:layout_height="36dp"
                     android:layout_gravity="center"
-                    android:visibility="GONE"
+                    android:visibility="gone"
                     android:indeterminateTint="@color/accent_amber" />
 
                 <!-- Bottom Duration & File Size Badges -->

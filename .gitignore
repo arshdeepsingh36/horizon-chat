@@ -43,9 +43,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
-platform-tools/
 *.apk
-!apk/*.apk
+apk/
+release_apk/
 apk_output/
 
 # ADB Test Artifacts

@@ -1338,8 +1338,30 @@ class ChatActivity : AppCompatActivity() {
                     val data = args[0] as? JSONObject
                     val uId = data?.optInt("userId")
                     val status = data?.optString("status")
+                    val lastSeen = data?.optString("lastSeen")
                     if (uId == targetUserId) {
                         isTargetOnline = status == "online"
+                        if (!lastSeen.isNullOrEmpty()) {
+                            targetLastSeen = lastSeen
+                        }
+                        runOnUiThread {
+                            updatePresenceUI(isTargetOnline, false)
+                        }
+                    }
+                }
+            }
+
+            mSocket?.on("user_status_change") { args ->
+                if (args.isNotEmpty()) {
+                    val data = args[0] as? JSONObject
+                    val uId = data?.optInt("userId")
+                    val status = data?.optString("status")
+                    val lastSeen = data?.optString("lastSeen")
+                    if (uId == targetUserId) {
+                        isTargetOnline = status == "online"
+                        if (!lastSeen.isNullOrEmpty()) {
+                            targetLastSeen = lastSeen
+                        }
                         runOnUiThread {
                             updatePresenceUI(isTargetOnline, false)
                         }
