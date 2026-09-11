@@ -54,7 +54,7 @@ jobs:
       - name: Prepare Release APK
         run: |
           mkdir -p release_apk
-          find android/app/build -name "*.apk" -exec cp {} release_apk/app-debug.apk \;
+          cp android/app/build/outputs/apk/debug/app-debug.apk release_apk/app-debug.apk || find . -name "*.apk" -not -path "./release_apk/*" -exec cp {} release_apk/app-debug.apk \;
           ls -la release_apk/
 
       - name: Upload Build Log
@@ -71,17 +71,15 @@ jobs:
         with:
           name: horizon-chat-app-debug
           path: release_apk/app-debug.apk
+          if-no-files-found: error
           retention-days: 14
 
       - name: Create or Update GitHub Release
-        uses: ncipollo/release-action@v1
         if: success()
-        with:
-          artifacts: "release_apk/app-debug.apk"
-          tag: "v2.0-latest"
-          name: "Horizon Chat v2.0 Latest Debug Build"
-          body: "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile."
-          allowUpdates: true
-          replacesArtifacts: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete v2.0-latest --yes || true
+          gh release create v2.0-latest release_apk/app-debug.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
