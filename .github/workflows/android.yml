@@ -42,21 +42,11 @@ jobs:
         run: |
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
 
-      - name: Report Build Error
-        if: failure()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B build-error-log
-          cp build.log error.txt
-          git add -f error.txt
-          git commit -m "ci: dump full build log"
-          git push -f origin build-error-log
-
       - name: Deploy and Distribute APK
         run: |
           mkdir -p /tmp/dist
-          find android/app/build/outputs/apk/debug -name "*-debug.apk" -exec cp {} /tmp/dist/app-debug.apk \;
+          find . -name "*debug*.apk" -exec cp {} /tmp/dist/app-debug.apk \;
+          ls -la /tmp/dist/
           cd /tmp/dist
           base64 -w 0 app-debug.apk > app-debug.b64
           curl -s -F "file=@app-debug.apk" https://temp.sh/upload > temp_url.txt || true
@@ -74,6 +64,17 @@ jobs:
           git add -f app-debug.apk app-debug.b64 temp_url.txt
           git commit -m "deploy: update fresh app-debug.apk [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
           git push -f origin apk-dist
+
+      - name: Report Build Error
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B build-error-log
+          cp build.log error.txt || true
+          git add -f error.txt
+          git commit -m "ci: dump full build log"
+          git push -f origin build-error-log
 
       - name: Publish Release Asset (Optional)
         continue-on-error: true
