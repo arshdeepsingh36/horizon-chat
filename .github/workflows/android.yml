@@ -42,7 +42,15 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace > ../build.log 2>&1 || (echo "=== COMPILATION ERROR DUMP ===" && tail -n 100 ../build.log && exit 1)
+          ./gradlew assembleDebug --no-daemon --stacktrace > ../build.log 2>&1 || (cat ../build.log | grep -E "e: |error:|FAILED|FAILURE" -C 5 && exit 1)
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: build.log
+
 
 
       - name: Show Generated APK Files
