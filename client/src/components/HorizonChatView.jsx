@@ -11,7 +11,12 @@ import {
   Clock,
   Play,
   Pause,
-  Mic
+  Mic,
+  FileText,
+  Film,
+  ExternalLink,
+  Share2,
+  X
 } from 'lucide-react';
 
 // Helper to normalize message objects across snake_case and camelCase
@@ -63,6 +68,7 @@ export default function HorizonChatView({
   const [isPartnerOnline, setIsPartnerOnline] = useState(partner?.online || false);
   const [playingVoiceId, setPlayingVoiceId] = useState(null);
   const [voiceProgress, setVoiceProgress] = useState(0);
+  const [lightboxMedia, setLightboxMedia] = useState(null); // { type: 'IMAGE'|'VIDEO', url, title, sender, timestamp, caption }
   const activeAudioRef = useRef(null);
 
   const canvasRef = useRef(null);
@@ -523,7 +529,24 @@ export default function HorizonChatView({
                 <div className={`horizon-bubble ${isMe ? 'outgoing' : 'incoming'}`}>
                   {/* Media / Micro-Preview Card (Rules Section 3 & TRD Section 5.3) */}
                   {isMedia && (
-                    <div className="horizon-media-card" style={{ marginBottom: '6px' }}>
+                    <div
+                      className="horizon-media-card"
+                      style={{ marginBottom: '6px', cursor: (isDownloaded || msg.attachmentUrl) ? 'pointer' : 'default' }}
+                      onClick={() => {
+                        if (isDownloaded || msg.attachmentUrl) {
+                          const url = (msg.attachmentUrl && msg.attachmentUrl.startsWith('http'))
+                            ? msg.attachmentUrl
+                            : `${apiBaseUrl.replace(/\/$/, '')}/${(msg.attachmentUrl || '').replace(/^\//, '')}`;
+                          setLightboxMedia({
+                            type: 'IMAGE',
+                            url: url || msg.thumbnailBlur,
+                            title: `Photo from @${isMe ? 'You' : partner.username}`,
+                            subtitle: formatMessageTime(msg.createdAt),
+                            caption: msg.text
+                          });
+                        }
+                      }}
+                    >
                       <div className="horizon-blur-container">
                         <img
                           src={isDownloaded ? msg.attachmentUrl : msg.thumbnailBlur}
@@ -535,7 +558,10 @@ export default function HorizonChatView({
                         {!isDownloaded && (
                           <div
                             className="horizon-download-scrim"
-                            onClick={() => !isDownloading && handleDownloadMedia(msg.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!isDownloading) handleDownloadMedia(msg.id);
+                            }}
                             title="Tap to download media"
                           >
                             {isDownloading ? (
@@ -580,11 +606,94 @@ export default function HorizonChatView({
                     </div>
                   )}
 
+                  {/* Video Attachment Card */}
+                  {msg.attachmentType === 'VIDEO' && (
+                    <div
+                      className="horizon-media-card"
+                      style={{ marginBottom: '6px', borderRadius: '12px', overflow: 'hidden', cursor: 'pointer' }}
+                      onClick={() => {
+                        if (msg.attachmentUrl) {
+                          const url = msg.attachmentUrl.startsWith('http') ? msg.attachmentUrl : `${apiBaseUrl.replace(/\/$/, '')}/${msg.attachmentUrl.replace(/^\//, '')}`;
+                          setLightboxMedia({
+                            type: 'VIDEO',
+                            url,
+                            title: `Video from @${isMe ? 'You' : partner.username}`,
+                            subtitle: formatMessageTime(msg.createdAt),
+                            caption: msg.text
+                          });
+                        }
+                      }}
+                    >
+                      {msg.attachmentUrl ? (
+                        <video
+                          src={msg.attachmentUrl.startsWith('http') ? msg.attachmentUrl : `${apiBaseUrl.replace(/\/$/, '')}/${msg.attachmentUrl.replace(/^\//, '')}`}
+                          controls
+                          playsInline
+                          style={{ width: '100%', maxHeight: '240px', borderRadius: '12px', display: 'block', backgroundColor: '#000' }}
+                          poster={msg.thumbnailBlur || undefined}
+                        />
+                      ) : (
+                        <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-accent-amber)' }}>
+                          <Film size={20} />
+                          <span style={{ fontSize: '13px' }}>Video Attachment ({formatFileSize(msg.fileSizeBytes)})</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Document Attachment Card */}
+                  {msg.attachmentType === 'DOCUMENT' && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '10px 14px',
+                        borderRadius: '12px',
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        marginBottom: '6px',
+                        cursor: msg.attachmentUrl ? 'pointer' : 'default'
+                      }}
+                      onClick={() => {
+                        if (msg.attachmentUrl) {
+                          const url = msg.attachmentUrl.startsWith('http') ? msg.attachmentUrl : `${apiBaseUrl.replace(/\/$/, '')}/${msg.attachmentUrl.replace(/^\//, '')}`;
+                          window.open(url, '_blank');
+                        }
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '8px',
+                          background: 'linear-gradient(135deg, #F59E0B, #EA580C)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#fff',
+                          flexShrink: 0
+                        }}
+                      >
+                        <FileText size={20} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#F8FAFC', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          {msg.text || 'Document Attachment'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                          {formatFileSize(msg.fileSizeBytes)} • Tap to download
+                        </div>
+                      </div>
+                      <Download size={16} color="#F59E0B" />
+                    </div>
+                  )}
+
                   {/* Message Text */}
-                  {msg.attachmentType !== 'AUDIO' && (
+                  {msg.attachmentType !== 'AUDIO' && msg.attachmentType !== 'DOCUMENT' && (
                     msg.text ? (
                       <div className="horizon-bubble-text">{msg.text}</div>
-                    ) : !isMedia ? (
+                    ) : (!isMedia && msg.attachmentType !== 'VIDEO') ? (
                       <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.7 }}>
                         (Empty message)
                       </div>
@@ -654,6 +763,167 @@ export default function HorizonChatView({
           <Send size={18} style={{ marginLeft: '2px' }} />
         </button>
       </form>
+
+      {/* Full-Screen Interactive Player & Photo Viewer Modal */}
+      {lightboxMedia && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: '#000000',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
+          }}
+        >
+          {/* Top Bar */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 18px',
+              background: 'linear-gradient(180deg, rgba(14,22,38,0.95) 0%, rgba(14,22,38,0.6) 80%, transparent 100%)',
+              zIndex: 10
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <button
+                onClick={() => setLightboxMedia(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '36px',
+                  height: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  cursor: 'pointer'
+                }}
+                title="Back"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <div>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: '#F8FAFC' }}>
+                  {lightboxMedia.title}
+                </div>
+                <div style={{ fontSize: '11px', color: '#94A3B8' }}>
+                  {lightboxMedia.subtitle || 'Horizon Media'}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = lightboxMedia.url;
+                  a.download = `horizon_${lightboxMedia.type.toLowerCase()}_${Date.now()}`;
+                  a.target = '_blank';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #F59E0B, #EA580C)',
+                  border: 'none',
+                  borderRadius: '20px',
+                  padding: '8px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+                title="Save / Download to Gallery"
+              >
+                <Download size={16} />
+                <span>Save</span>
+              </button>
+
+              <button
+                onClick={() => setLightboxMedia(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '36px',
+                  height: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  cursor: 'pointer'
+                }}
+                title="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Media Canvas with Aspect-Ratio Fitting */}
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+              padding: '12px'
+            }}
+          >
+            {lightboxMedia.type === 'VIDEO' ? (
+              <video
+                src={lightboxMedia.url}
+                controls
+                autoPlay
+                playsInline
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '8px',
+                  backgroundColor: '#000'
+                }}
+              />
+            ) : (
+              <img
+                src={lightboxMedia.url}
+                alt="Full size media"
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '8px'
+                }}
+              />
+            )}
+          </div>
+
+          {/* Bottom Caption Bar */}
+          {lightboxMedia.caption && (
+            <div
+              style={{
+                padding: '14px 20px',
+                background: 'rgba(22, 34, 56, 0.85)',
+                color: '#F8FAFC',
+                fontSize: '14px',
+                textAlign: 'center',
+                borderTop: '1px solid rgba(255,255,255,0.08)'
+              }}
+            >
+              {lightboxMedia.caption}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

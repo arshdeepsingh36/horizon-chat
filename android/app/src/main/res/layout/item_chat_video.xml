@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingVertical="4dp">
+
+    <androidx.cardview.widget.CardView
+        android:id="@+id/cardVideo"
+        android:layout_width="260dp"
+        android:layout_height="wrap_content"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="2dp"
+        app:cardBackgroundColor="@color/bubble_sent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Video Thumbnail with Play Overlay & Duration Badge -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="170dp"
+                android:background="@color/surface">
+
+                <ImageView
+                    android:id="@+id/ivVideoThumbnail"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop" />
+
+                <!-- Translucent gradient scrim -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#40000000" />
+
+                <!-- Center Play Badge Button -->
+                <ImageView
+                    android:id="@+id/btnPlayVideoOverlay"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_video_play_badge" />
+
+                <!-- Progress Loading Bar (on pending/downloading) -->
+                <ProgressBar
+                    android:id="@+id/pbVideoLoading"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_gravity="center"
+                    android:visibility="GONE"
+                    android:indeterminateTint="@color/accent_amber" />
+
+                <!-- Bottom Duration & File Size Badges -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom"
+                    android:orientation="horizontal"
+                    android:padding="8dp"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tvVideoDuration"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0:45"
+                        android:textColor="#FFFBEB"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:background="#990E1626"
+                        android:paddingHorizontal="6dp"
+                        android:paddingVertical="2dp" />
+
+                    <TextView
+                        android:id="@+id/tvVideoSize"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="4.2 MB"
+                        android:textColor="#FED7AA"
+                        android:textSize="11sp"
+                        android:layout_marginStart="6dp"
+                        android:background="#990E1626"
+                        android:paddingHorizontal="6dp"
+                        android:paddingVertical="2dp" />
+
+                </LinearLayout>
+
+            </FrameLayout>
+
+            <!-- Video Caption & Meta -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="6dp">
+
+                <TextView
+                    android:id="@+id/tvVideoCaption"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Video"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/tvTimestamp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FED7AA"
+                    android:textSize="11sp"
+                    android:layout_marginStart="6dp" />
+
+                <ImageView
+                    android:id="@+id/ivTicks"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="4dp"
+                    android:src="@drawable/ic_tick_double"
+                    app:tint="@color/ticks_read" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </androidx.cardview.widget.CardView>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

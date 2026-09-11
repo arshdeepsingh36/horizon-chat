@@ -18,8 +18,27 @@ data class User(
     @SerializedName("avatarUrl")
     val avatarUrl: String? = null,
 
+    @SerializedName("lastSeen")
+    val lastSeen: String? = null,
+
     @SerializedName("online")
-    var online: Boolean = false
+    var online: Boolean = false,
+
+    @SerializedName("isBlocked")
+    var isBlocked: Boolean = false
+)
+
+data class BlockRequest(
+    @SerializedName("targetUserId")
+    val targetUserId: Int
+)
+
+data class ReportRequest(
+    @SerializedName("targetUserId")
+    val targetUserId: Int,
+
+    @SerializedName("reason")
+    val reason: String
 )
 
 data class AuthResponse(

@@ -20,7 +20,13 @@ import {
   getUserConversations,
   updateUserProfile,
   updateUserPassword,
-  markMediaViewed
+  markMediaViewed,
+  updateUserLastSeen,
+  blockUser,
+  unblockUser,
+  isUserBlocked,
+  reportUser,
+  clearConversationMessages
 } from './db.js';
 
 dotenv.config();
@@ -163,7 +169,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   }
 });
 
-// 3. User Lookup (TRD Section 3.4)
+// 3. User Lookup (TRD Section 3.4 & Phase 2b)
 app.get('/api/users/lookup', authenticateToken, async (req, res) => {
   try {
     const query = req.query.username;
@@ -172,13 +178,17 @@ app.get('/api/users/lookup', authenticateToken, async (req, res) => {
     const user = await lookupUser(query);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    const blocked = await isUserBlocked(req.user.id, user.id);
+
     return res.json({
       id: user.id,
       username: user.username,
       displayName: user.display_name || user.username,
       bioStatus: user.bio_status || 'Hey there! I am using Horizon Chat.',
       avatarUrl: user.avatar_url || null,
-      online: isUserOnline(user.id)
+      lastSeen: user.last_seen || null,
+      online: isUserOnline(user.id),
+      isBlocked: blocked
     });
   } catch (err) {
     console.error('[LOOKUP ERROR]', err);
@@ -186,7 +196,7 @@ app.get('/api/users/lookup', authenticateToken, async (req, res) => {
   }
 });
 
-// 3b. Current User Profile (Phase 2)
+// 3b. Current User Profile (Phase 2 & Phase 2b)
 app.get('/api/users/me', authenticateToken, async (req, res) => {
   try {
     const user = await findUserById(req.user.id);
@@ -198,6 +208,7 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
       displayName: user.display_name || user.username,
       bioStatus: user.bio_status || 'Hey there! I am using Horizon Chat.',
       avatarUrl: user.avatar_url || null,
+      lastSeen: user.last_seen || null,
       createdAt: user.created_at
     });
   } catch (err) {
@@ -206,25 +217,47 @@ app.get('/api/users/me', authenticateToken, async (req, res) => {
   }
 });
 
-// 3c. Update Profile (Phase 2)
+// 3c. Update Profile (Phase 2 & Phase 2b)
 app.put('/api/users/profile', authenticateToken, async (req, res) => {
   try {
-    const { displayName, bioStatus, avatarUrl } = req.body || {};
+    let { displayName, bioStatus, avatarUrl } = req.body || {};
+
+    // If avatar is base64, save to static /uploads/ for fast CDN and Glide compatibility
+    if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.startsWith('data:image/')) {
+      try {
+        const matches = avatarUrl.match(/^data:image\/([A-Za-z0-9\-\+\.]+);base64,(.+)$/s);
+        const ext = matches && matches[1] ? (matches[1] === 'jpeg' ? 'jpg' : matches[1]) : 'jpg';
+        const rawBase64 = matches ? matches[2] : (avatarUrl.includes('base64,') ? avatarUrl.split('base64,')[1] : avatarUrl);
+        const buf = Buffer.from(rawBase64, 'base64');
+        const fileName = `avatar_${req.user.id}_${Date.now()}.${ext}`;
+        fs.writeFileSync(path.join(uploadsDir, fileName), buf);
+        const serverHost = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
+        avatarUrl = `${serverHost}/uploads/${fileName}`;
+      } catch (err) {
+        console.error('[AVATAR SAVE ERROR]', err);
+      }
+    }
+
     const updated = await updateUserProfile(req.user.id, {
       displayName: displayName !== undefined ? displayName.trim() : null,
       bioStatus: bioStatus !== undefined ? bioStatus.trim() : null,
       avatarUrl: avatarUrl !== undefined ? avatarUrl : null
     });
 
+    const userObj = {
+      id: updated.id,
+      username: updated.username,
+      displayName: updated.display_name || updated.username,
+      bioStatus: updated.bio_status,
+      avatarUrl: updated.avatar_url
+    };
+
+    // Broadcast user_profile_updated to all connected sockets
+    io.emit('user_profile_updated', userObj);
+
     return res.json({
       success: true,
-      user: {
-        id: updated.id,
-        username: updated.username,
-        displayName: updated.display_name || updated.username,
-        bioStatus: updated.bio_status,
-        avatarUrl: updated.avatar_url
-      }
+      user: userObj
     });
   } catch (err) {
     console.error('[UPDATE PROFILE ERROR]', err);
@@ -254,7 +287,59 @@ app.put('/api/users/password', authenticateToken, async (req, res) => {
   }
 });
 
-// 3e. Mark View-Once Media Viewed (Phase 2)
+// 3e. Moderation: Block User (Phase 2b)
+app.post('/api/users/block', authenticateToken, async (req, res) => {
+  try {
+    const { targetUserId } = req.body || {};
+    if (!targetUserId) return res.status(400).json({ error: 'targetUserId is required' });
+    await blockUser(req.user.id, Number(targetUserId));
+    return res.json({ success: true, message: 'User blocked' });
+  } catch (err) {
+    console.error('[BLOCK ERROR]', err);
+    return res.status(500).json({ error: 'Failed to block user' });
+  }
+});
+
+// 3f. Moderation: Unblock User (Phase 2b)
+app.post('/api/users/unblock', authenticateToken, async (req, res) => {
+  try {
+    const { targetUserId } = req.body || {};
+    if (!targetUserId) return res.status(400).json({ error: 'targetUserId is required' });
+    await unblockUser(req.user.id, Number(targetUserId));
+    return res.json({ success: true, message: 'User unblocked' });
+  } catch (err) {
+    console.error('[UNBLOCK ERROR]', err);
+    return res.status(500).json({ error: 'Failed to unblock user' });
+  }
+});
+
+// 3g. Moderation: Report User (Phase 2b)
+app.post('/api/users/report', authenticateToken, async (req, res) => {
+  try {
+    const { targetUserId, reason = 'Inappropriate content' } = req.body || {};
+    if (!targetUserId) return res.status(400).json({ error: 'targetUserId is required' });
+    await reportUser(req.user.id, Number(targetUserId), reason);
+    return res.json({ success: true, message: 'Report submitted. Thank you for keeping Horizon Chat safe.' });
+  } catch (err) {
+    console.error('[REPORT ERROR]', err);
+    return res.status(500).json({ error: 'Failed to submit report' });
+  }
+});
+
+// 3h. Chat Management: Clear Conversation History (Phase 2b)
+app.delete('/api/messages/conversations/:targetUserId', authenticateToken, async (req, res) => {
+  try {
+    const targetUserId = parseInt(req.params.targetUserId, 10);
+    if (isNaN(targetUserId)) return res.status(400).json({ error: 'Invalid target user ID' });
+    await clearConversationMessages(req.user.id, targetUserId);
+    return res.json({ success: true, message: 'Conversation cleared' });
+  } catch (err) {
+    console.error('[CLEAR CONVERSATION ERROR]', err);
+    return res.status(500).json({ error: 'Failed to clear conversation' });
+  }
+});
+
+// 3i. Mark View-Once Media Viewed (Phase 2)
 app.post('/api/messages/:id/view-once', authenticateToken, async (req, res) => {
   try {
     const messageId = parseInt(req.params.id, 10);
@@ -459,6 +544,20 @@ io.on('connection', (socket) => {
     if (!recipientId || (!text && !attachmentUrl)) return;
 
     const rId = Number(recipientId);
+
+    // Block check
+    try {
+      const blocked = await isUserBlocked(userId, rId);
+      if (blocked) {
+        if (typeof callback === 'function') {
+          callback({ success: false, error: 'Communication blocked between users.' });
+        }
+        return;
+      }
+    } catch (err) {
+      console.error('[BLOCK CHECK ERROR]', err);
+    }
+
     const recipientOnline = isUserOnline(rId);
     const initialStatus = recipientOnline ? 'DELIVERED' : 'SENT';
 
@@ -617,16 +716,23 @@ io.on('connection', (socket) => {
   });
 
   // Disconnect
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     const userSockets = onlineUsers.get(userId);
     if (userSockets) {
       userSockets.delete(socket.id);
       if (userSockets.size === 0) {
         onlineUsers.delete(userId);
+        const lastSeen = new Date().toISOString();
+        try {
+          await updateUserLastSeen(userId);
+        } catch (e) {
+          console.error('[LAST SEEN ERROR]', e);
+        }
         console.log(`[SOCKET DISCONNECT] User @${socket.user.username} (ID: ${userId}) went offline.`);
         socket.broadcast.emit('user_status_changed', {
           userId,
-          status: 'offline'
+          status: 'offline',
+          lastSeen
         });
       }
     }

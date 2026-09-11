@@ -18,6 +18,7 @@ import com.chatapp.horizon.databinding.ItemChatDocBinding
 import com.chatapp.horizon.databinding.ItemChatLocationBinding
 import com.chatapp.horizon.databinding.ItemChatSentMediaBinding
 import com.chatapp.horizon.databinding.ItemChatVoiceBinding
+import com.chatapp.horizon.databinding.ItemChatVideoBinding
 import com.chatapp.horizon.databinding.ItemMessageReceivedBinding
 import com.chatapp.horizon.databinding.ItemMessageSentBinding
 import com.chatapp.horizon.models.ChatMessage
@@ -39,7 +40,8 @@ class ChatAdapter(
     private val onMediaDownloadClicked: (ChatMessage) -> Unit,
     private val onViewOnceClicked: (ChatMessage) -> Unit = {},
     private val onImageClicked: (ChatMessage) -> Unit = {},
-    private val onDocumentClicked: (ChatMessage) -> Unit = {}
+    private val onDocumentClicked: (ChatMessage) -> Unit = {},
+    private val onVideoClicked: (ChatMessage) -> Unit = {}
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -50,6 +52,7 @@ class ChatAdapter(
         private const val TYPE_VOICE = 5
         private const val TYPE_LOCATION = 6
         private const val TYPE_DOCUMENT = 7
+        private const val TYPE_VIDEO = 8
         private const val MAX_HEAP_ITEMS = 200
     }
 
@@ -143,6 +146,7 @@ class ChatAdapter(
         val msg = messages[position]
         val isSent = msg.senderId == currentUserId
         return when {
+            msg.attachmentType == "VIDEO" -> TYPE_VIDEO
             msg.attachmentType == "AUDIO" -> TYPE_VOICE
             msg.attachmentType == "LOCATION" -> TYPE_LOCATION
             msg.attachmentType == "DOCUMENT" -> TYPE_DOCUMENT
@@ -160,6 +164,7 @@ class ChatAdapter(
             TYPE_SENT_TEXT -> SentTextViewHolder(ItemMessageSentBinding.inflate(inflater, parent, false))
             TYPE_RECEIVED_TEXT -> ReceivedTextViewHolder(ItemMessageReceivedBinding.inflate(inflater, parent, false))
             TYPE_SENT_MEDIA, TYPE_RECEIVED_MEDIA -> MediaViewHolder(ItemChatSentMediaBinding.inflate(inflater, parent, false))
+            TYPE_VIDEO -> VideoViewHolder(ItemChatVideoBinding.inflate(inflater, parent, false), onVideoClicked)
             TYPE_VOICE -> VoiceViewHolder(ItemChatVoiceBinding.inflate(inflater, parent, false)) { m, b ->
                 handleVoicePlayback(m, b)
             }
@@ -176,6 +181,7 @@ class ChatAdapter(
             is SentTextViewHolder -> holder.bind(msg)
             is ReceivedTextViewHolder -> holder.bind(msg)
             is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked, onImageClicked)
+            is VideoViewHolder -> holder.bind(msg, isSent)
             is VoiceViewHolder -> holder.bind(msg, isSent, msg.id == activePlayingMsgId && activeMediaPlayer?.isPlaying == true)
             is LocationViewHolder -> holder.bind(msg, isSent)
             is DocViewHolder -> holder.bind(msg, isSent, onDocumentClicked)
@@ -597,6 +603,52 @@ class ChatAdapter(
             }
             binding.cardDoc.setOnClickListener {
                 onDocumentClicked(msg)
+            }
+        }
+    }
+
+    class VideoViewHolder(
+        private val binding: ItemChatVideoBinding,
+        private val onVideoClicked: (ChatMessage) -> Unit
+    ) : RecyclerView.ViewHolder(binding.root) {
+        fun bind(msg: ChatMessage, isSent: Boolean) {
+            val context = itemView.context
+            val params = binding.cardVideo.layoutParams as ConstraintLayout.LayoutParams
+            if (isSent) {
+                params.endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                params.startToStart = ConstraintLayout.LayoutParams.UNSET
+                binding.cardVideo.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_sent))
+                binding.ivTicks.visibility = View.VISIBLE
+                updateTicks(binding.ivTicks, msg.status)
+            } else {
+                params.startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                params.endToEnd = ConstraintLayout.LayoutParams.UNSET
+                binding.cardVideo.setCardBackgroundColor(ContextCompat.getColor(context, R.color.bubble_received))
+                binding.ivTicks.visibility = View.GONE
+            }
+            binding.cardVideo.layoutParams = params
+
+            binding.tvVideoCaption.text = if (!msg.messageText.isNullOrEmpty() && msg.messageText != "Video") msg.messageText else "Video"
+            binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
+            binding.tvVideoSize.text = if (msg.fileSizeBytes > 0) formatFileSize(msg.fileSizeBytes) else "Video File"
+            binding.tvVideoDuration.text = if (msg.thumbnailBlur != null && msg.thumbnailBlur!!.contains("dur:")) {
+                msg.thumbnailBlur!!.substringAfter("dur:")
+            } else {
+                "▶ Video"
+            }
+
+            val thumbUrl = if (msg.thumbnailBlur != null && !msg.thumbnailBlur!!.contains("dur:")) msg.thumbnailBlur else msg.attachmentUrl
+            Glide.with(context)
+                .load(thumbUrl)
+                .centerCrop()
+                .placeholder(R.drawable.ic_attach_gallery)
+                .into(binding.ivVideoThumbnail)
+
+            binding.cardVideo.setOnClickListener {
+                onVideoClicked(msg)
+            }
+            binding.btnPlayVideoOverlay.setOnClickListener {
+                onVideoClicked(msg)
             }
         }
     }

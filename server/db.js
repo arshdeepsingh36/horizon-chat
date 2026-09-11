@@ -60,11 +60,28 @@ export async function initDb() {
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS display_name TEXT;
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.';
+      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
+
+      CREATE TABLE IF NOT EXISTS user_blocks (
+        id SERIAL PRIMARY KEY,
+        blocker_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        blocked_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (blocker_id, blocked_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_reports (
+        id SERIAL PRIMARY KEY,
+        reporter_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        reported_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        reason TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
-    console.log('[DB] PostgreSQL initialized successfully (Phase 2).');
+    console.log('[DB] PostgreSQL initialized successfully (Phase 2b).');
   } else {
     console.log('[DB] DATABASE_URL not detected. Falling back to local SQLite...');
     const dataDir = path.join(__dirname, 'data');
@@ -116,18 +133,43 @@ export async function initDb() {
           ON messages(sender_id, recipient_id, id DESC);
         `, (err) => {
           if (err) return reject(err);
-          // Safe SQLite column additions
-          const tryAdd = (sql) => sqliteDb.run(sql, () => {});
-          tryAdd("ALTER TABLE accounts ADD COLUMN avatar_url TEXT");
-          tryAdd("ALTER TABLE accounts ADD COLUMN display_name TEXT");
-          tryAdd("ALTER TABLE accounts ADD COLUMN bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.'");
-          tryAdd("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
-          tryAdd("ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0");
-          resolve();
+          // Safe SQLite column additions (SQLite cannot use non-constant defaults like CURRENT_TIMESTAMP in ALTER TABLE)
+          sqliteDb.serialize(() => {
+            const tryAdd = (sql) => sqliteDb.run(sql, () => {});
+            tryAdd("ALTER TABLE accounts ADD COLUMN avatar_url TEXT");
+            tryAdd("ALTER TABLE accounts ADD COLUMN display_name TEXT");
+            tryAdd("ALTER TABLE accounts ADD COLUMN bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.'");
+            tryAdd("ALTER TABLE accounts ADD COLUMN last_seen DATETIME");
+            tryAdd("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
+            tryAdd("ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0");
+
+            sqliteDb.run(`
+              CREATE TABLE IF NOT EXISTS user_blocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                blocker_id INTEGER NOT NULL,
+                blocked_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (blocker_id, blocked_id)
+              );
+            `, () => {});
+
+            sqliteDb.run(`
+              CREATE TABLE IF NOT EXISTS user_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reporter_id INTEGER NOT NULL,
+                reported_id INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+              );
+            `, (err) => {
+              if (err) return reject(err);
+              resolve();
+            });
+          });
         });
       });
     });
-    console.log('[DB] SQLite initialized at ' + dbPath + ' (Phase 2).');
+    console.log('[DB] SQLite initialized at ' + dbPath + ' (Phase 2b).');
   }
 }
 
@@ -136,14 +178,14 @@ export async function findUserByUsername(username) {
   const normalized = username.trim();
   if (isPg) {
     const res = await pgPool.query(
-      'SELECT id, username, password_hash, display_name, bio_status, avatar_url, created_at FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      'SELECT id, username, password_hash, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
       [normalized]
     );
     return res.rows[0] || null;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.get(
-        'SELECT id, username, password_hash, display_name, bio_status, avatar_url, created_at FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
+        'SELECT id, username, password_hash, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
         [normalized],
         (err, row) => {
           if (err) return reject(err);
@@ -157,14 +199,14 @@ export async function findUserByUsername(username) {
 export async function findUserById(id) {
   if (isPg) {
     const res = await pgPool.query(
-      'SELECT id, username, display_name, bio_status, avatar_url, created_at FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT id, username, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE id = $1 LIMIT 1',
       [id]
     );
     return res.rows[0] || null;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.get(
-        'SELECT id, username, display_name, bio_status, avatar_url, created_at FROM accounts WHERE id = ? LIMIT 1',
+        'SELECT id, username, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE id = ? LIMIT 1',
         [id],
         (err, row) => {
           if (err) return reject(err);
@@ -180,7 +222,7 @@ export async function createUser(username, passwordHash, displayName = null) {
   const dName = displayName || clean;
   if (isPg) {
     const res = await pgPool.query(
-      'INSERT INTO accounts (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name, bio_status, avatar_url, created_at',
+      'INSERT INTO accounts (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name, bio_status, avatar_url, last_seen, created_at',
       [clean, passwordHash, dName]
     );
     return res.rows[0];
@@ -191,7 +233,7 @@ export async function createUser(username, passwordHash, displayName = null) {
         [clean, passwordHash, dName],
         function (err) {
           if (err) return reject(err);
-          resolve({ id: this.lastID, username: clean, display_name: dName, bio_status: 'Hey there! I am using Horizon Chat.', avatar_url: null });
+          resolve({ id: this.lastID, username: clean, display_name: dName, bio_status: 'Hey there! I am using Horizon Chat.', avatar_url: null, last_seen: new Date().toISOString() });
         }
       );
     });
@@ -202,18 +244,129 @@ export async function lookupUser(query) {
   const clean = query.trim().toLowerCase();
   if (isPg) {
     const res = await pgPool.query(
-      'SELECT id, username, display_name, bio_status, avatar_url FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      'SELECT id, username, display_name, bio_status, avatar_url, last_seen FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
       [clean]
     );
     return res.rows[0] || null;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.get(
-        'SELECT id, username, display_name, bio_status, avatar_url FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
+        'SELECT id, username, display_name, bio_status, avatar_url, last_seen FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
         [clean],
         (err, row) => {
           if (err) return reject(err);
           resolve(row || null);
+        }
+      );
+    });
+  }
+}
+
+export async function updateUserLastSeen(userId) {
+  if (isPg) {
+    await pgPool.query('UPDATE accounts SET last_seen = CURRENT_TIMESTAMP WHERE id = $1', [userId]);
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run('UPDATE accounts SET last_seen = CURRENT_TIMESTAMP WHERE id = ?', [userId], (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  }
+}
+
+export async function blockUser(blockerId, blockedId) {
+  if (isPg) {
+    await pgPool.query(
+      'INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT (blocker_id, blocked_id) DO NOTHING',
+      [blockerId, blockedId]
+    );
+    return true;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)',
+        [blockerId, blockedId],
+        (err) => {
+          if (err) return reject(err);
+          resolve(true);
+        }
+      );
+    });
+  }
+}
+
+export async function unblockUser(blockerId, blockedId) {
+  if (isPg) {
+    await pgPool.query('DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2', [blockerId, blockedId]);
+    return true;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run('DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?', [blockerId, blockedId], (err) => {
+        if (err) return reject(err);
+        resolve(true);
+      });
+    });
+  }
+}
+
+export async function isUserBlocked(userA, userB) {
+  if (isPg) {
+    const res = await pgPool.query(
+      'SELECT id FROM user_blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1) LIMIT 1',
+      [userA, userB]
+    );
+    return res.rows.length > 0;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.get(
+        'SELECT id FROM user_blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?) LIMIT 1',
+        [userA, userB, userB, userA],
+        (err, row) => {
+          if (err) return reject(err);
+          resolve(!!row);
+        }
+      );
+    });
+  }
+}
+
+export async function reportUser(reporterId, reportedId, reason) {
+  if (isPg) {
+    await pgPool.query(
+      'INSERT INTO user_reports (reporter_id, reported_id, reason) VALUES ($1, $2, $3)',
+      [reporterId, reportedId, reason]
+    );
+    return true;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'INSERT INTO user_reports (reporter_id, reported_id, reason) VALUES (?, ?, ?)',
+        [reporterId, reportedId, reason],
+        (err) => {
+          if (err) return reject(err);
+          resolve(true);
+        }
+      );
+    });
+  }
+}
+
+export async function clearConversationMessages(userId, partnerId) {
+  if (isPg) {
+    await pgPool.query(
+      'DELETE FROM messages WHERE (sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1)',
+      [userId, partnerId]
+    );
+    return true;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'DELETE FROM messages WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)',
+        [userId, partnerId, partnerId, userId],
+        (err) => {
+          if (err) return reject(err);
+          resolve(true);
         }
       );
     });

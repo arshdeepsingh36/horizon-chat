@@ -8,9 +8,11 @@ node_modules/
 .env.*.local
 *.env
 
-# Local Database Files
+# Local Database & Upload Files
 server/data/*.db
 server/data/*.sqlite
+server/uploads/*
+!server/uploads/.gitkeep
 *.db
 *.sqlite
 *.sqlite3

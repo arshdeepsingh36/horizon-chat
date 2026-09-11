@@ -70,6 +70,30 @@ interface ApiService {
         @Header("Authorization") token: String,
         @Body request: MediaUploadRequest
     ): Response<MediaUploadResponse>
+
+    @DELETE("api/messages/conversations/{targetUserId}")
+    suspend fun clearConversation(
+        @Header("Authorization") token: String,
+        @Path("targetUserId") targetUserId: Int
+    ): Response<GenericResponse>
+
+    @POST("api/users/block")
+    suspend fun blockUser(
+        @Header("Authorization") token: String,
+        @Body request: BlockRequest
+    ): Response<GenericResponse>
+
+    @POST("api/users/unblock")
+    suspend fun unblockUser(
+        @Header("Authorization") token: String,
+        @Body request: BlockRequest
+    ): Response<GenericResponse>
+
+    @POST("api/users/report")
+    suspend fun reportUser(
+        @Header("Authorization") token: String,
+        @Body request: ReportRequest
+    ): Response<GenericResponse>
 }
 
 object ApiClient {

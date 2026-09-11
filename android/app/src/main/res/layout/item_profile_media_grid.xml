@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="100dp"
+    android:layout_margin="3dp"
+    android:background="@color/surface">
+
+    <ImageView
+        android:id="@+id/ivMediaThumb"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop" />
+
+    <!-- Video Play Badge Overlay if video -->
+    <ImageView
+        android:id="@+id/ivVideoOverlay"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:layout_gravity="center"
+        android:src="@drawable/ic_video_play_badge"
+        android:visibility="GONE" />
+
+    <!-- Duration Badge -->
+    <TextView
+        android:id="@+id/tvDuration"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:text="0:30"
+        android:textColor="#FFFBEB"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:background="#B30E1626"
+        android:paddingHorizontal="4dp"
+        android:paddingVertical="2dp"
+        android:layout_margin="4dp"
+        android:visibility="GONE" />
+
+</FrameLayout>

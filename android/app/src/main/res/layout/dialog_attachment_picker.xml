@@ -136,9 +136,8 @@
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
                 android:backgroundTint="#24334D"
-                android:src="@drawable/ic_attach_doc"
-                android:padding="13dp"
-                app:tint="#A855F7" />
+                android:src="@drawable/ic_horizon_doc_badge"
+                android:padding="8dp" />
 
             <TextView
                 android:layout_width="wrap_content"

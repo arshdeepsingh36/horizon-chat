@@ -9,6 +9,9 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.location.Location
+import android.location.LocationManager
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
@@ -57,12 +60,17 @@ class ChatActivity : AppCompatActivity() {
     private var currentUserId: Int = 1
     private var targetUserId: Int = 2
     private var targetUsername: String = "User"
+    private var targetDisplayName: String = "User"
     private var targetAvatarUrl: String? = null
+    private var targetBioStatus: String = ""
+    private var targetLastSeen: String? = null
+    private var isTargetOnline: Boolean = false
     private var authToken: String = ""
     private var serverUrl: String = ApiClient.BASE_URL.trimEnd('/')
 
     private var isLoadingOlder = false
     private var isViewOnceActive = false
+    private var cachedMessageList = mutableListOf<ChatMessage>()
 
     // Typing Debounce
     private val typingHandler = Handler(Looper.getMainLooper())
@@ -90,6 +98,12 @@ class ChatActivity : AppCompatActivity() {
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let { handlePickedImage(it) }
+    }
+
+    private val videoPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { handleCapturedVideo(it) }
     }
 
     private val documentPickerLauncher = registerForActivityResult(
@@ -126,11 +140,38 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            fetchAndSendRealLocation()
+        } else {
+            Toast.makeText(this, "Location permission is required to share current location", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private val audioPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
             Toast.makeText(this, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val profileLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val cleared = result.data?.getBooleanExtra("ACTION_CLEARED", false) ?: false
+            if (cleared) {
+                adapter.setMessages(emptyList())
+                cachedMessageList.clear()
+            }
+            val searchTriggered = result.data?.getBooleanExtra("ACTION_SEARCH", false) ?: false
+            if (searchTriggered) {
+                binding.layoutInChatSearch.visibility = View.VISIBLE
+                binding.etSearchInChat.requestFocus()
+            }
         }
     }
 
@@ -142,33 +183,63 @@ class ChatActivity : AppCompatActivity() {
         currentUserId = intent.getIntExtra("CURRENT_USER_ID", 1)
         targetUserId = intent.getIntExtra("TARGET_USER_ID", 2)
         targetUsername = intent.getStringExtra("TARGET_USERNAME") ?: "User"
+        targetDisplayName = intent.getStringExtra("TARGET_DISPLAY_NAME") ?: targetUsername
         targetAvatarUrl = intent.getStringExtra("TARGET_AVATAR_URL")
+        targetBioStatus = intent.getStringExtra("TARGET_BIO_STATUS") ?: ""
         authToken = intent.getStringExtra("AUTH_TOKEN") ?: ""
 
         setupUI()
         setupSocket()
+        refreshTargetUserProfile()
         loadInitialMessages()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupUI() {
-        binding.tvRecipientName.text = "@$targetUsername"
+        binding.tvRecipientName.text = targetDisplayName.ifEmpty { "@$targetUsername" }
         binding.btnBack.setOnClickListener { finish() }
 
-        if (!targetAvatarUrl.isNullOrEmpty()) {
-            Glide.with(this)
-                .load(targetAvatarUrl)
-                .placeholder(android.R.drawable.sym_def_app_icon)
-                .into(binding.ivRecipientAvatar)
-        }
+        renderToolbarAvatar()
 
-        // Tapping recipient avatar opens profile picture in full-screen interactive lightbox
-        binding.ivRecipientAvatar.setOnClickListener {
-            if (!targetAvatarUrl.isNullOrEmpty()) {
-                openLightboxViewer(targetAvatarUrl!!, "@$targetUsername Profile Picture")
-            } else {
-                Toast.makeText(this, "@$targetUsername (No avatar set)", Toast.LENGTH_SHORT).show()
+        // Tapping recipient avatar or name opens dedicated UserProfileActivity
+        val openProfileListener = View.OnClickListener {
+            val intent = Intent(this, UserProfileActivity::class.java).apply {
+                putExtra("CURRENT_USER_ID", currentUserId)
+                putExtra("TARGET_USER_ID", targetUserId)
+                putExtra("TARGET_USERNAME", targetUsername)
+                putExtra("TARGET_DISPLAY_NAME", targetDisplayName)
+                putExtra("TARGET_AVATAR_URL", targetAvatarUrl)
+                putExtra("TARGET_BIO_STATUS", targetBioStatus)
+                putExtra("TARGET_LAST_SEEN", targetLastSeen)
+                putExtra("TARGET_ONLINE", isTargetOnline)
+                putExtra("AUTH_TOKEN", authToken)
             }
+            profileLauncher.launch(intent)
+        }
+        binding.ivRecipientAvatar.setOnClickListener(openProfileListener)
+        binding.tvRecipientName.setOnClickListener(openProfileListener)
+
+        // In-Chat Search Listener
+        binding.etSearchInChat.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString()?.trim()?.lowercase() ?: ""
+                if (query.isEmpty()) {
+                    adapter.setMessages(cachedMessageList)
+                } else {
+                    val filtered = cachedMessageList.filter {
+                        (it.messageText ?: "").lowercase().contains(query)
+                    }
+                    adapter.setMessages(filtered)
+                }
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        binding.btnCloseInChatSearch.setOnClickListener {
+            binding.etSearchInChat.setText("")
+            binding.layoutInChatSearch.visibility = View.GONE
+            adapter.setMessages(cachedMessageList)
         }
 
         val layoutManager = LinearLayoutManager(this).apply {
@@ -180,12 +251,9 @@ class ChatActivity : AppCompatActivity() {
             currentUserId = currentUserId,
             onMediaDownloadClicked = { /* Handled in adapter */ },
             onViewOnceClicked = { viewOnceMsg -> showViewOnceModal(viewOnceMsg) },
-            onImageClicked = { imgMsg ->
-                if (!imgMsg.attachmentUrl.isNullOrEmpty()) {
-                    openLightboxViewer(imgMsg.attachmentUrl!!, "Photo")
-                }
-            },
-            onDocumentClicked = { docMsg -> openDocumentFile(docMsg) }
+            onImageClicked = { imgMsg -> openPhotoViewer(imgMsg) },
+            onDocumentClicked = { docMsg -> openDocumentFile(docMsg) },
+            onVideoClicked = { videoMsg -> launchVideoPlayer(videoMsg) }
         )
         binding.rvChatMessages.adapter = adapter
 
@@ -655,6 +723,47 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
+    private fun launchVideoPlayer(msg: ChatMessage) {
+        val intent = Intent(this, VideoPlayerActivity::class.java).apply {
+            putExtra("VIDEO_URL", msg.attachmentUrl)
+            putExtra("VIDEO_TITLE", msg.messageText ?: "Video")
+        }
+        startActivity(intent)
+    }
+
+    private fun renderToolbarAvatar() {
+        if (!targetAvatarUrl.isNullOrEmpty()) {
+            Glide.with(this)
+                .load(targetAvatarUrl)
+                .circleCrop()
+                .placeholder(android.R.drawable.sym_def_app_icon)
+                .into(binding.ivRecipientAvatar)
+        }
+    }
+
+    private fun refreshTargetUserProfile() {
+        if (authToken.isEmpty()) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val res = ApiClient.apiService.lookupUser("Bearer $authToken", targetUsername)
+                if (res.isSuccessful && res.body() != null) {
+                    val user = res.body()!!
+                    withContext(Dispatchers.Main) {
+                        targetDisplayName = user.displayName ?: user.username
+                        targetBioStatus = user.bioStatus ?: ""
+                        targetAvatarUrl = user.avatarUrl
+                        targetLastSeen = user.lastSeen
+                        isTargetOnline = user.online
+                        binding.tvRecipientName.text = targetDisplayName.ifEmpty { "@$targetUsername" }
+                        renderToolbarAvatar()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     // ====================================================
     // 3. NATIVE ANDROID CAMERA INTEGRATION (PHOTO & VIDEO)
     // ====================================================
@@ -688,16 +797,46 @@ class ChatActivity : AppCompatActivity() {
     private fun handleCapturedVideo(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                var durationMs = 0L
+                var thumbBase64: String? = null
+
+                try {
+                    val retriever = MediaMetadataRetriever()
+                    retriever.setDataSource(this@ChatActivity, uri)
+                    val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    durationMs = durStr?.toLongOrNull() ?: 0L
+                    val frameBitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    if (frameBitmap != null) {
+                        val scaled = Bitmap.createScaledBitmap(frameBitmap, 320, 240, true)
+                        val baos = ByteArrayOutputStream()
+                        scaled.compress(Bitmap.CompressFormat.JPEG, 70, baos)
+                        thumbBase64 = "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+                    }
+                    retriever.release()
+                } catch (metaErr: Exception) {
+                    metaErr.printStackTrace()
+                }
+
+                val durSec = (durationMs / 1000).toInt()
+                val durationText = String.format("%d:%02d", durSec / 60, durSec % 60)
+
                 val inputStream = contentResolver.openInputStream(uri)
                 val bytes = inputStream?.readBytes() ?: ByteArray(0)
                 inputStream?.close()
+
+                if (bytes.size > 50 * 1024 * 1024) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@ChatActivity, "Video exceeds 50MB limit", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
 
                 val base64 = "data:video/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val uploadReq = MediaUploadRequest(
                     imageBase64 = base64,
                     fileName = "video_${System.currentTimeMillis()}.mp4",
                     fileSizeBytes = bytes.size.toLong(),
-                    thumbnailBlur = null
+                    thumbnailBlur = thumbBase64
                 )
                 val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
                 val finalUrl = if (response.isSuccessful && response.body() != null) {
@@ -706,15 +845,16 @@ class ChatActivity : AppCompatActivity() {
                     base64
                 }
 
+                val metaThumb = (thumbBase64 ?: "") + ";dur:" + durationText
                 val viewOnce = isViewOnceActive
                 withContext(Dispatchers.Main) {
                     isViewOnceActive = false
                     updateViewOnceToggleUI()
                     sendMessage(
-                        text = "Video",
+                        text = durationText,
                         attachmentType = "VIDEO",
                         attachmentUrl = finalUrl,
-                        thumbnailBlur = null,
+                        thumbnailBlur = metaThumb,
                         fileSizeBytes = bytes.size.toLong(),
                         isViewOnce = viewOnce
                     )
@@ -778,7 +918,6 @@ class ChatActivity : AppCompatActivity() {
                 inputStream?.close()
 
                 if (originalBitmap != null) {
-                    // Downscale large camera photos to max 1280px for instant upload
                     val maxDim = 1280
                     val width = originalBitmap.width
                     val height = originalBitmap.height
@@ -789,13 +928,11 @@ class ChatActivity : AppCompatActivity() {
                         originalBitmap
                     }
 
-                    // 1. Generate 20x20 micro-blur thumbnail (~200 bytes)
                     val microThumb = Bitmap.createScaledBitmap(scaledBitmap, 20, 20, true)
                     val thumbStream = ByteArrayOutputStream()
                     microThumb.compress(Bitmap.CompressFormat.JPEG, 60, thumbStream)
                     val thumbBase64 = "data:image/jpeg;base64," + Base64.encodeToString(thumbStream.toByteArray(), Base64.NO_WRAP)
 
-                    // 2. Compress full image (JPEG 75% quality)
                     val fullStream = ByteArrayOutputStream()
                     scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, fullStream)
                     val imageBytes = fullStream.toByteArray()
@@ -808,7 +945,6 @@ class ChatActivity : AppCompatActivity() {
                         updateViewOnceToggleUI()
                     }
 
-                    // 3. Upload real image to server
                     var uploadedUrl: String? = null
                     try {
                         val uploadReq = MediaUploadRequest(
@@ -825,7 +961,6 @@ class ChatActivity : AppCompatActivity() {
                         uploadErr.printStackTrace()
                     }
 
-                    // 4. Fallback to direct data URI if offline
                     val finalUrl = uploadedUrl ?: fullBase64
 
                     withContext(Dispatchers.Main) {
@@ -850,7 +985,7 @@ class ChatActivity : AppCompatActivity() {
 
     private fun handlePickedDocument(uri: Uri) {
         var docName = "Document.pdf"
-        var docSize = 1048576L
+        var docSize = 0L
 
         try {
             contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -865,26 +1000,100 @@ class ChatActivity : AppCompatActivity() {
             e.printStackTrace()
         }
 
-        sendMessage(
-            text = docName,
-            attachmentType = "DOCUMENT",
-            attachmentUrl = "https://cdn.horizonchat.io/docs/$docName",
-            thumbnailBlur = null,
-            fileSizeBytes = docSize,
-            isViewOnce = false
-        )
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                val bytes = inputStream?.readBytes() ?: ByteArray(0)
+                inputStream?.close()
+
+                if (docSize == 0L) docSize = bytes.size.toLong()
+
+                val base64 = "data:application/octet-stream;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val uploadReq = MediaUploadRequest(
+                    imageBase64 = base64,
+                    fileName = docName,
+                    fileSizeBytes = docSize,
+                    thumbnailBlur = null
+                )
+
+                // Cache local copy for instant viewing
+                try {
+                    val docsDir = File(cacheDir, "documents").apply { mkdirs() }
+                    File(docsDir, docName).writeBytes(bytes)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
+                val finalUrl = if (response.isSuccessful && response.body() != null) {
+                    response.body()!!.attachmentUrl
+                } else {
+                    base64
+                }
+
+                withContext(Dispatchers.Main) {
+                    sendMessage(
+                        text = docName,
+                        attachmentType = "DOCUMENT",
+                        attachmentUrl = finalUrl,
+                        thumbnailBlur = null,
+                        fileSizeBytes = docSize,
+                        isViewOnce = false
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Failed to upload document: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun sendLocation() {
-        val coordsText = "30.7333° N, 76.7794° E"
-        sendMessage(
-            text = coordsText,
-            attachmentType = "LOCATION",
-            attachmentUrl = "https://maps.google.com/?q=30.7333,76.7794",
-            thumbnailBlur = null,
-            fileSizeBytes = 0,
-            isViewOnce = false
-        )
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        } else {
+            fetchAndSendRealLocation()
+        }
+    }
+
+    private fun fetchAndSendRealLocation() {
+        try {
+            val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            val location: Location? = try {
+                locationManager?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: locationManager?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            } catch (e: SecurityException) {
+                null
+            }
+
+            val lat = location?.latitude ?: 30.7333
+            val lng = location?.longitude ?: 76.7794
+
+            val coordsText = String.format(Locale.US, "%.4f° N, %.4f° E", lat, lng)
+            val mapUrl = "https://maps.google.com/?q=$lat,$lng"
+
+            sendMessage(
+                text = coordsText,
+                attachmentType = "LOCATION",
+                attachmentUrl = mapUrl,
+                thumbnailBlur = null,
+                fileSizeBytes = 0,
+                isViewOnce = false
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            sendMessage(
+                text = "30.7333° N, 76.7794° E",
+                attachmentType = "LOCATION",
+                attachmentUrl = "https://maps.google.com/?q=30.7333,76.7794",
+                thumbnailBlur = null,
+                fileSizeBytes = 0,
+                isViewOnce = false
+            )
+        }
     }
 
     private fun updateViewOnceToggleUI() {
@@ -1287,6 +1496,56 @@ class ChatActivity : AppCompatActivity() {
             isViewed = json.optBoolean("is_viewed", false),
             createdAt = json.optString("created_at", "")
         )
+    }
+
+    private fun openPhotoViewer(msg: ChatMessage) {
+        val url = msg.attachmentUrl ?: return
+        val sender = if (msg.senderId == currentUserId) "You" else targetUsername
+        val intent = Intent(this, PhotoViewerActivity::class.java).apply {
+            putExtra("PHOTO_URL", url)
+            putExtra("PHOTO_TITLE", "Photo")
+            putExtra("SENDER_NAME", sender)
+            putExtra("TIMESTAMP", msg.createdAt)
+            putExtra("CAPTION", msg.messageText)
+        }
+        startActivity(intent)
+    }
+
+    private fun launchVideoPlayer(msg: ChatMessage) {
+        val url = msg.attachmentUrl ?: return
+        val sender = if (msg.senderId == currentUserId) "You" else targetUsername
+        val intent = Intent(this, VideoPlayerActivity::class.java).apply {
+            putExtra("VIDEO_URL", url)
+            putExtra("VIDEO_TITLE", "Video")
+            putExtra("SENDER_NAME", sender)
+            putExtra("TIMESTAMP", msg.createdAt)
+        }
+        startActivity(intent)
+    }
+
+    private fun openDocumentFile(docMsg: ChatMessage) {
+        val url = docMsg.attachmentUrl ?: return
+        try {
+            if (url.startsWith("file://") || url.startsWith("/")) {
+                val file = File(url.removePrefix("file://"))
+                val uri = FileProvider.getUriForFile(this, "${applicationContext.packageName}.fileprovider", file)
+                val ext = MimeTypeMap.getFileExtensionFromUrl(file.name)
+                val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mimeType)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(Intent.createChooser(intent, "Open Document"))
+            } else {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Cannot open document: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onDestroy() {

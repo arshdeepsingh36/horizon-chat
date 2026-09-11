@@ -64,6 +64,51 @@
 
     </androidx.appcompat.widget.Toolbar>
 
+    <!-- In-Chat Message Search Bar -->
+    <LinearLayout
+        android:id="@+id/layoutInChatSearch"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/surface_elevated"
+        android:padding="8dp"
+        android:visibility="GONE"
+        app:layout_constraintTop_toBottomOf="@id/chatToolbar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/ic_search"
+            android:layout_marginStart="8dp"
+            app:tint="@color/accent_amber" />
+
+        <EditText
+            android:id="@+id/etSearchInChat"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginHorizontal="8dp"
+            android:background="@null"
+            android:hint="Search messages in conversation..."
+            android:textColor="@color/text_primary"
+            android:textColorHint="@color/text_muted"
+            android:textSize="13sp"
+            android:singleLine="true" />
+
+        <ImageView
+            android:id="@+id/btnCloseInChatSearch"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@android:drawable/ic_menu_close_clear_cancel"
+            android:padding="4dp"
+            android:layout_marginEnd="8dp"
+            app:tint="@color/text_muted" />
+
+    </LinearLayout>
+
     <!-- Message Feed with Infinite Scroll -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvChatMessages"
@@ -72,7 +117,7 @@
         android:padding="8dp"
         android:clipToPadding="false"
         app:stackFromEnd="true"
-        app:layout_constraintTop_toBottomOf="@id/chatToolbar"
+        app:layout_constraintTop_toBottomOf="@id/layoutInChatSearch"
         app:layout_constraintBottom_toTopOf="@id/dockContainer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />

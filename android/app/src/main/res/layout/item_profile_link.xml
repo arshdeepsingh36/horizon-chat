@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="10dp"
+    android:background="@drawable/input_bg"
+    android:layout_marginBottom="6dp">
+
+    <ImageView
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:src="@drawable/ic_link"
+        android:padding="6dp"
+        android:background="@drawable/circle_avatar_bg"
+        android:backgroundTint="#24334D"
+        app:tint="@color/accent_amber" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginStart="10dp">
+
+        <TextView
+            android:id="@+id/tvUrlText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="https://example.com"
+            android:textColor="@color/accent_amber"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/tvLinkMeta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Shared Link • Sep 11, 2026"
+            android:textColor="@color/text_muted"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="OPEN ↗"
+        android:textColor="@color/text_primary"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:background="#24334D"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="4dp" />
+
+</LinearLayout>
