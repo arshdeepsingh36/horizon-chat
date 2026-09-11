@@ -11,7 +11,7 @@
 ## Step 3: Video Picker & Camera Capture
 - [x] Task 3.1: Update media picker filter to allow video selection alongside images
 - [x] Task 3.2: Wire native camera intent to record video instead of sending text label "Video"
-- [x] Task 3.3: Render video message bubbles with thumbnail and fullscreen video player
+- [x] Task 3.3: Render video message bubbles with instant optimistic send, uploading indicator overlay, background upload, and transition to sent with ticks
 
 ## Step 4: User Profile Screen
 - [x] Task 4.1: Make chat header (avatar and name) navigate to UserProfileScreen
