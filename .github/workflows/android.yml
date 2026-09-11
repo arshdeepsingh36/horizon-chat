@@ -81,5 +81,7 @@ jobs:
           name: "Horizon Chat v2.0 Latest Debug Build"
           body: "Automated latest build containing Phase 2b video messaging pipeline, full-screen media players, and profile repositories."
           files: release_apk/app-debug.apk
+          overwrite: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
