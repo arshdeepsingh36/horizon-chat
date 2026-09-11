@@ -8,7 +8,9 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd server && node server.js",
     "client": "cd client && npm run dev",
-    "test:server": "cd server && node test_ephemeral.js"
+    "test:server": "cd server && node test_ephemeral.js",
+    "test:phase2b": "node server/test_phase2b.js",
+    "test:mobile": "node scripts/test_mobile_automated.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
