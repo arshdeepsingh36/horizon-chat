@@ -70,10 +70,14 @@ jobs:
 
 
       - name: Create or Update GitHub Release
-        run: |
-          gh release upload v2.0-latest release_apk/app-debug.apk --clobber || gh release create v2.0-latest release_apk/app-debug.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile."
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "release_apk/app-debug.apk"
+          tag: "v2.0-latest"
+          name: "Horizon Chat v2.0 Latest Debug Build"
+          body: "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile."
+          allowUpdates: true
+          replacesArtifacts: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
 
