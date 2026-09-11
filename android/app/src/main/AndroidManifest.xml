@@ -47,28 +47,28 @@
 
         <activity
             android:name=".ui.ChatActivity"
-            android:exported="false"
+            android:exported="true"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.ProfileActivity"
-            android:exported="false"
+            android:exported="true"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.UserProfileActivity"
-            android:exported="false"
+            android:exported="true"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".ui.VideoPlayerActivity"
-            android:exported="false"
+            android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="sensor" />
 
         <activity
             android:name=".ui.PhotoViewerActivity"
-            android:exported="false"
+            android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="sensor" />
 
