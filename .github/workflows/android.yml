@@ -71,11 +71,13 @@ jobs:
 
 
       - name: Create or Update GitHub Release
-        run: |
-          gh release delete v2.0-latest --yes --cleanup-tag || true
-          git push --delete origin v2.0-latest || true
-          gh release create v2.0-latest release_apk/app-debug.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." --clobber || gh release upload v2.0-latest release_apk/app-debug.apk --clobber
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0-latest
+          name: "Horizon Chat v2.0 Latest Debug Build"
+          body: "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile."
+          files: release_apk/app-debug.apk
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 
