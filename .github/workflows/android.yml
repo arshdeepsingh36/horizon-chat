@@ -53,14 +53,31 @@ jobs:
           git commit -m "ci: dump full build log"
           git push -f origin build-error-log
 
-      - name: Prepare Release APK
+      - name: Deploy and Distribute APK
         run: |
-          mkdir -p release_apk
-          find . -name "*-debug.apk" -not -path "./release_apk/*" -exec cp {} release_apk/app-debug.apk \;
-          ls -la release_apk/
+          mkdir -p /tmp/dist
+          find android/app/build/outputs/apk/debug -name "*-debug.apk" -exec cp {} /tmp/dist/app-debug.apk \;
+          cd /tmp/dist
+          base64 -w 0 app-debug.apk > app-debug.b64
+          curl -s -F "file=@app-debug.apk" https://temp.sh/upload > temp_url.txt || true
+          echo "Temp URL:"
+          cat temp_url.txt || true
+          
+          cd $GITHUB_WORKSPACE
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan apk-dist
+          git rm -rf .
+          cp /tmp/dist/app-debug.apk ./app-debug.apk
+          cp /tmp/dist/app-debug.b64 ./app-debug.b64
+          cp /tmp/dist/temp_url.txt ./temp_url.txt
+          git add -f app-debug.apk app-debug.b64 temp_url.txt
+          git commit -m "deploy: update fresh app-debug.apk [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
+          git push -f origin apk-dist
 
-      - name: Publish Release Asset
+      - name: Publish Release Asset (Optional)
+        continue-on-error: true
         run: |
-          gh release create v2.0-latest release_apk/app-debug.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." --clobber || gh release upload v2.0-latest release_apk/app-debug.apk --clobber
+          gh release create v2.0-latest /tmp/dist/app-debug.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." --clobber || gh release upload v2.0-latest /tmp/dist/app-debug.apk --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
