@@ -38,10 +38,25 @@ function captureScreenshot(name) {
   return localPath;
 }
 
+function wakeAndUnlockDevice() {
+  try {
+    adb('shell input keyevent 224'); // WAKEUP
+    adb('shell wm dismiss-keyguard');
+    adb('shell cmd statusbar collapse');
+  } catch (e) {
+    // ignore
+  }
+}
+
 function getFocusedActivity() {
-  const output = adb(`shell dumpsys window`);
-  const match = output.match(/mCurrentFocus=Window\{[^\s]+ [^\s]+ ([^\}]+)\}/);
-  return match ? match[1] : 'Unknown';
+  try {
+    const output = adb(`shell dumpsys window`);
+    const match = output.match(/mCurrentFocus=Window\{[^\s]+ [^\s]+ ([^\}\r\n]+)\}/) ||
+                  output.match(/mFocusedApp=ActivityRecord\{[^\s]+ [^\s]+ ([^\s\r\n]+)/);
+    return match ? match[1].trim() : 'Unknown';
+  } catch (e) {
+    return 'Unknown';
+  }
 }
 
 function clearLogcat() {
@@ -83,6 +98,7 @@ async function runMobileTestSuite() {
     if (!devices.includes(DEVICE_ID)) {
       throw new Error(`Device ${DEVICE_ID} not found in adb devices`);
     }
+    wakeAndUnlockDevice();
     const size = adb('shell wm size').trim();
     const batteryOutput = adb('shell dumpsys battery');
     const levelMatch = batteryOutput.match(/level:\s*(\d+)/);
@@ -97,6 +113,7 @@ async function runMobileTestSuite() {
   // --- STEP 2: App Clean Launch ---
   console.log('\n--- Step 2: App Clean Launch ---');
   try {
+    wakeAndUnlockDevice();
     adb(`shell am force-stop ${PKG}`);
     await sleep(1000);
     adb(`shell am start -n ${PKG}/com.chatapp.horizon.ui.AuthActivity`);
@@ -116,16 +133,19 @@ async function runMobileTestSuite() {
     let focus = getFocusedActivity();
     if (focus.includes('AuthActivity')) {
       console.log('  Logging in with test account @arsh...');
-      adb('shell input tap 540 900');
+      // Tap Username field
+      adb('shell input tap 540 1300');
       await sleep(500);
       adb('shell input text arsh');
       await sleep(500);
-      adb('shell input tap 540 1050');
+      // Tap Password field
+      adb('shell input tap 540 1470');
       await sleep(500);
       adb('shell input text secret123');
       await sleep(500);
-      adb('shell input tap 540 1250');
-      await sleep(2500);
+      // Tap Sign In button
+      adb('shell input tap 540 1700');
+      await sleep(3000);
       focus = getFocusedActivity();
     }
 
@@ -157,9 +177,16 @@ async function runMobileTestSuite() {
     adb(`shell input text ${testMsg}`);
     await sleep(800);
 
-    // Tap send button (~ 980, 2220)
+    // Tap send button (~ 910, 1180 or 980, 2220)
+    adb('shell input tap 910 1180');
+    await sleep(500);
     adb('shell input tap 980 2220');
-    await sleep(1500);
+    await sleep(1000);
+
+    // Dismiss soft keyboard
+    adb('shell input keyevent 111'); // KEYCODE_ESCAPE
+    adb('shell input keyevent 4');   // KEYCODE_BACK (dismisses IME)
+    await sleep(800);
 
     captureScreenshot('04_message_sent_bubble');
     recordStep('Send Text Message Flow', true, `Sent: ${testMsg}`);
