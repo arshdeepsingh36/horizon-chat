@@ -14,6 +14,6 @@
 - [x] Task 3.3: Render video message bubbles with thumbnail and fullscreen video player
 
 ## Step 4: User Profile Screen
-- [ ] Task 4.1: Make chat header (avatar and name) navigate to UserProfileScreen
-- [ ] Task 4.2: Build profile details UI (avatar, bio, presence, mute, search, clear/block/report)
-- [ ] Task 4.3: Add shared content tabs (Media, Docs with app logo, Links)
+- [x] Task 4.1: Make chat header (avatar and name) navigate to UserProfileScreen
+- [x] Task 4.2: Build profile details UI (avatar, bio, presence, mute, search, clear/block/report)
+- [x] Task 4.3: Add shared content tabs (Media, Docs with app logo, Links)
