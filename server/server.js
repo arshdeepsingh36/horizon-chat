@@ -524,6 +524,7 @@ io.on('connection', (socket) => {
     onlineUsers.set(userId, new Set());
     console.log(`[SOCKET CONNECT] User @${socket.user.username} (ID: ${userId}) connected.`);
     socket.broadcast.emit('user_status_changed', { userId, status: 'online' });
+    socket.broadcast.emit('user_status_change', { userId, status: 'online' });
   }
   onlineUsers.get(userId).add(socket.id);
 
@@ -738,6 +739,11 @@ io.on('connection', (socket) => {
         }
         console.log(`[SOCKET DISCONNECT] User @${socket.user.username} (ID: ${userId}) went offline.`);
         socket.broadcast.emit('user_status_changed', {
+          userId,
+          status: 'offline',
+          lastSeen
+        });
+        socket.broadcast.emit('user_status_change', {
           userId,
           status: 'offline',
           lastSeen
