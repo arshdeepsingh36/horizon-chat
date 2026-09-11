@@ -75,13 +75,8 @@ jobs:
 
       - name: Create or Update GitHub Release
         if: success()
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v2.0-latest
-          name: "Horizon Chat v2.0 Latest Debug Build"
-          body: "Automated latest build containing Phase 2b video messaging pipeline, full-screen media players, and profile repositories."
-          files: release_apk/app-debug.apk
-          overwrite: true
-          fail_on_unmatched_files: true
+        run: |
+          gh release view v2.0-latest || gh release create v2.0-latest --title "Horizon Chat v2.0 Latest Debug Build" --notes "Latest build"
+          gh release upload v2.0-latest release_apk/app-debug.apk --clobber
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
