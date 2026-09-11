@@ -42,14 +42,19 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace > ../build.log 2>&1 || (cat ../build.log | grep -E "e: |error:|FAILED|FAILURE" -C 5 && exit 1)
+          ./gradlew assembleDebug --no-daemon --stacktrace > ../build.log 2>&1
 
-      - name: Upload Build Log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log
-          path: build.log
+      - name: Report Build Error
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B build-error-log
+          cp build.log error.txt
+          git add -f error.txt
+          git commit -m "ci: dump full build log"
+          git push -f origin build-error-log
+
 
 
 
