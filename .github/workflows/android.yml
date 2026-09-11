@@ -54,7 +54,7 @@ jobs:
       - name: Prepare Release APK
         run: |
           mkdir -p release_apk
-          find . -name "*.apk" -exec cp {} release_apk/app-debug.apk \;
+          cp android/app/build/outputs/apk/debug/app-debug.apk release_apk/app-debug.apk
           ls -la release_apk/
 
       - name: Upload Build Log
