@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Android APK
@@ -40,6 +43,7 @@ jobs:
         working-directory: ./android
         run: |
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build_output.log
+          ls -la app/build/outputs/apk/debug/
 
       - name: Upload Build Log
         if: always()
@@ -54,5 +58,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: horizon-chat-app-debug
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
           retention-days: 14
+
+      - name: Create or Update GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0-latest
+          name: "Horizon Chat v2.0 Latest Debug Build"
+          body: "Automated latest build containing Phase 2b video messaging pipeline, full-screen media players, and profile repositories."
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
