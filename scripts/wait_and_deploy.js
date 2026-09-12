@@ -59,7 +59,7 @@ async function waitForAndDownloadApk() {
   console.log(`--- Waiting for fresh APK build on GitHub ---`);
 
   let attempts = 0;
-  while (attempts < 35) {
+  while (attempts < 120) {
     attempts++;
     console.log(`[${new Date().toLocaleTimeString()}] Attempt ${attempts}: Checking for updated APK...`);
 
