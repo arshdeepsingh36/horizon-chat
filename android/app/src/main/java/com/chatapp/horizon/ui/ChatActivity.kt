@@ -589,7 +589,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                                 val target = convs[which]
                                 MessageDispatchManager.enqueueMessage(
                                     currentUserId = currentUserId,
-                                    recipientId = target.partnerUserId,
+                                    recipientId = target.partnerId,
                                     text = msg.messageText ?: "",
                                     attachmentType = msg.attachmentType,
                                     attachmentUrl = msg.attachmentUrl,

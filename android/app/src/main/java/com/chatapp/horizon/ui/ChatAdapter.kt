@@ -562,29 +562,28 @@ class ChatAdapter(
 
             binding.downloadOverlay.setOnClickListener {
                 binding.downloadOverlay.visibility = View.GONE
-                binding.pbLoading.visibility = View.VISIBLE
                 onDownloadClicked(msg)
-
-                if (!msg.attachmentUrl.isNullOrEmpty()) {
-                    if (msg.attachmentUrl.startsWith("data:image/")) {
+                val url = msg.attachmentUrl
+                if (!url.isNullOrEmpty()) {
+                    if (url.startsWith("data:image/")) {
                         try {
-                            val cleanBase64 = msg.attachmentUrl.substringAfter("base64,")
+                            val cleanBase64 = url.substringAfter("base64,")
                             val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
                             val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
                             binding.ivThumbnail.setImageBitmap(bitmap)
                             isFullImageLoaded = true
                         } catch (e: Exception) {
-                            Glide.with(context).load(msg.attachmentUrl).into(binding.ivThumbnail)
+                            Glide.with(context).load(url).into(binding.ivThumbnail)
                             isFullImageLoaded = true
                         }
                     } else {
                         Glide.with(context)
-                            .load(msg.attachmentUrl)
+                            .load(url)
                             .into(binding.ivThumbnail)
                         isFullImageLoaded = true
                     }
-                    binding.pbLoading.visibility = View.GONE
                 }
+                binding.pbLoading.visibility = View.GONE
             }
         }
     }
