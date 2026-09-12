@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 */node_modules/
+package-lock.json
+server/package-lock.json
+client/package-lock.json
 
 # Environment Variables & Secrets (Keep .env.example tracked!)
 .env
@@ -27,6 +30,7 @@ android/build/
 android/app/build/
 android/local.properties
 android/.idea/
+android/captures/
 *.iml
 .gradle/
 
@@ -36,6 +40,8 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+build.log
+error.txt
 
 # OS & Editor Files
 .DS_Store
@@ -47,13 +53,25 @@ Thumbs.db
 apk/
 release_apk/
 apk_output/
+*.ico
 
-# ADB Test Artifacts
+
+# Dev, Testing & Verification Artifacts (Not for public repo)
+artifacts/
+scratch/
+archive/
+scripts/
+platform-tools/
+*.xml_dump
 window_dump.xml
 uidump.xml
 *_screen.png
 photo_*.png
 s_*.png
-platform-tools/
+test_*.js
+inspect_*.js
+feedback_loop.*
+PHASE_*.md
+
 
 

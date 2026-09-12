@@ -1,16 +1,12 @@
 {
-  "name": "ephemeral-p2p-chat",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Zero-Cost Ephemeral Peer-to-Peer Chat Application",
+  "name": "horizon-chat",
+  "version": "2.0.0",
+  "description": "Horizon Chat — Native Android & Cloud-Synced Real-Time Messenger",
   "scripts": {
     "start": "concurrently \"npm run server\" \"npm run client\"",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && node server.js",
-    "client": "cd client && npm run dev",
-    "test:server": "cd server && node test_ephemeral.js",
-    "test:phase2b": "node server/test_phase2b.js",
-    "test:mobile": "node scripts/test_mobile_automated.js"
+    "server": "cd server && npm start",
+    "client": "cd client && npm run dev"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

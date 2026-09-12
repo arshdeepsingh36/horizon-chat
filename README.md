@@ -27,9 +27,7 @@ Directly install Horizon Chat onto your Android phone:
 
 ### Quick ADB Install
 ```bash
-# If cloned locally:
-node scripts/download_apk.js
-adb install -r apk/app-debug.apk
+adb install -r app-debug.apk
 ```
 
 ---
@@ -37,7 +35,7 @@ adb install -r apk/app-debug.apk
 ## 📁 Repository Structure
 
 ```
-├── .gitignore                     # Git exclusion rules (node_modules, build artifacts, db, secrets)
+├── .gitignore                     # Git exclusion rules
 ├── .env.example                   # Environment variable template
 ├── README.md                      # Project documentation overview
 ├── PRD.md                         # Product Requirements Document (v2.0.0)
@@ -46,14 +44,12 @@ adb install -r apk/app-debug.apk
 ├── designsystem.md                # Sunset Glow & Twilight Ocean design tokens
 ├── ald.md                         # Architecture & Low-Level Design specifications
 ├── schema.sql                     # PostgreSQL production database migration
-├── feedback_loop.ps1              # Continuous feedback loop runner (PowerShell)
-├── feedback_loop.sh               # Continuous feedback loop runner (Bash)
+├── render.yaml                    # Cloud deployment specification
 │
 ├── server/                        # Node.js + Express + Socket.IO Backend
 │   ├── package.json
 │   ├── server.js                  # REST API, WebSocket gateway, R2 presigner
-│   ├── db.js                      # Dual PostgreSQL / SQLite persistence engine
-│   └── test_horizon_v2.js         # Automated end-to-end integration test suite
+│   └── db.js                      # Dual PostgreSQL / SQLite persistence engine
 │
 ├── client/                        # React + Vite Web App & PWA
 │   ├── index.html                 # PWA-enabled entry point with meta tags
