@@ -573,7 +573,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
     private fun showForwardDialog(msg: ChatMessage) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val res = ApiClient.apiService.getConversations("Bearer $authToken")
+                val res = ApiClient.apiService.getChats("Bearer $authToken")
                 if (res.isSuccessful && res.body() != null) {
                     val convs = res.body()!!
                     withContext(Dispatchers.Main) {
