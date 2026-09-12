@@ -51,10 +51,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B build-logs
-          git add build_error.log
-          git commit -m "ci: capture build error log" --allow-empty
-          git push origin build-logs --force
+          git add -f build_error.log || true
+          git commit -m "ci: capture build error log [skip ci]" --allow-empty
+          git push origin main
 
       - name: Prepare Distribution Files
         run: |
