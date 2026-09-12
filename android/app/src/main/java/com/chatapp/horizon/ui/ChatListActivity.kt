@@ -6,24 +6,18 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
-import android.widget.EditText
-import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.chatapp.horizon.databinding.ActivityChatListBinding
 import com.chatapp.horizon.models.ChatMessage
 import com.chatapp.horizon.models.Conversation
-import com.chatapp.horizon.models.User
 import com.chatapp.horizon.network.ApiClient
 import com.chatapp.horizon.network.MessageDispatchManager
 import com.chatapp.horizon.utils.HorizonNotificationManager
-import io.socket.client.Socket
 import kotlinx.coroutines.*
-import org.json.JSONObject
 
-class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageStatusListener {
+class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageEventListener {
 
     private lateinit var binding: ActivityChatListBinding
     private lateinit var adapter: ChatListAdapter
@@ -32,7 +26,7 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageStat
     private var currentUserId: Int = 1
     private var currentUsername: String = "User"
 
-    private var cachedConversations = mutableListOf<Conversation>()
+    private val cachedConversations = mutableListOf<Conversation>()
     private var searchJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -160,26 +154,7 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageStat
 
     private fun initSocketAndQueue() {
         if (authToken.isEmpty()) return
-        MessageDispatchManager.initSocket(authToken, currentUserId)
-
-        val socket = MessageDispatchManager.getSocket()
-        socket?.on("user_typing") { args ->
-            if (args.isNotEmpty()) {
-                val data = args[0] as? JSONObject
-                val uId = data?.optInt("userId") ?: return@on
-                val isTyping = data.optBoolean("isTyping", false)
-                runOnUiThread { adapter.setTyping(uId, isTyping) }
-            }
-        }
-
-        socket?.on("user_status_changed") { args ->
-            if (args.isNotEmpty()) {
-                val data = args[0] as? JSONObject
-                val uId = data?.optInt("userId") ?: return@on
-                val status = data.optString("status", "offline")
-                runOnUiThread { adapter.setUserOnline(uId, status == "online") }
-            }
-        }
+        MessageDispatchManager.initialize(authToken)
     }
 
     private fun loadChats() {
@@ -205,39 +180,47 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageStat
         }
     }
 
-    // MessageStatusListener Implementations
-    override fun onMessageDispatched(localClientId: String, serverMessage: ChatMessage) {
-        runOnUiThread { loadChats() }
-    }
-
-    override fun onMessageStatusChanged(messageId: Long, newStatus: String) {
-        runOnUiThread { loadChats() }
-    }
-
-    override fun onIncomingMessage(message: ChatMessage) {
+    // MessageEventListener Implementations
+    override fun onNewMessage(message: ChatMessage) {
         runOnUiThread {
             loadChats()
-            // Trigger push notification if in background or outside this conversation (Task 7)
-            val partner = cachedConversations.find { it.partnerId == message.senderId }
-            val senderName = partner?.partnerDisplayName ?: partner?.partnerUsername ?: "User @${message.senderId}"
-            val senderUsername = partner?.partnerUsername ?: "user_${message.senderId}"
+            // Trigger push notification if outside this conversation (Task 7)
+            if (message.senderId != currentUserId) {
+                val partner = cachedConversations.find { it.partnerId == message.senderId }
+                val senderName = partner?.partnerDisplayName ?: partner?.partnerUsername ?: "User @${message.senderId}"
+                val senderUsername = partner?.partnerUsername ?: "user_${message.senderId}"
 
-            HorizonNotificationManager.showIncomingMessageNotification(
-                this,
-                message,
-                senderUsername,
-                senderName,
-                currentUserId,
-                authToken
-            )
+                HorizonNotificationManager.showIncomingMessageNotification(
+                    this,
+                    message,
+                    senderUsername,
+                    senderName,
+                    currentUserId,
+                    authToken
+                )
+            }
         }
     }
 
-    override fun onMessageReacted(messageId: Long, reactions: Map<String, List<Int>>) {}
-    override fun onMessageDeleted(messageId: Long, deletedForEveryone: Boolean, messageText: String?) {
+    override fun onMessageStatusUpdated(messageId: Long, localClientId: String?, status: String) {
         runOnUiThread { loadChats() }
     }
-    override fun onMessagePinned(messageId: Long, isPinned: Boolean) {}
+
+    override fun onUserTyping(userId: Int, isTyping: Boolean) {
+        runOnUiThread { adapter.setTyping(userId, isTyping) }
+    }
+
+    override fun onUserStatusChanged(userId: Int, status: String, lastSeen: String?) {
+        runOnUiThread { adapter.setUserOnline(userId, status == "online") }
+    }
+
+    override fun onConversationRead(readerId: Int, partnerId: Int, readAt: String) {
+        runOnUiThread { loadChats() }
+    }
+
+    override fun onMessageDeleted(messageId: Long, deletedForEveryone: Boolean, deletedByUsers: List<Int>) {
+        runOnUiThread { loadChats() }
+    }
 
     override fun onDestroy() {
         super.onDestroy()

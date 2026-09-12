@@ -46,32 +46,32 @@ object AvatarHelper {
     }
 
     fun setupAvatar(
-        ivAvatar: ImageView,
-        tvInitials: TextView,
+        imageView: ImageView,
+        initialsView: TextView,
         avatarUrl: String?,
-        nameOrUsername: String?
+        name: String?
     ) {
-        val initials = getInitials(nameOrUsername)
-        val color = getAvatarColor(nameOrUsername)
+        val initials = getInitials(name)
+        val color = getAvatarColor(name)
 
-        tvInitials.text = initials
+        initialsView.text = initials
 
         val bgDrawable = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(color)
         }
-        tvInitials.background = bgDrawable
+        initialsView.background = bgDrawable
 
         if (!avatarUrl.isNullOrBlank()) {
-            ivAvatar.visibility = View.VISIBLE
-            tvInitials.visibility = View.GONE
-            Glide.with(ivAvatar.context)
+            imageView.visibility = View.VISIBLE
+            initialsView.visibility = View.GONE
+            Glide.with(imageView.context)
                 .load(avatarUrl)
                 .circleCrop()
-                .into(ivAvatar)
+                .into(imageView)
         } else {
-            ivAvatar.visibility = View.GONE
-            tvInitials.visibility = View.VISIBLE
+            imageView.visibility = View.GONE
+            initialsView.visibility = View.VISIBLE
         }
     }
 }

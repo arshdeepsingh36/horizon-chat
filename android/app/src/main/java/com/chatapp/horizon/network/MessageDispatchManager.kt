@@ -1,47 +1,50 @@
 package com.chatapp.horizon.network
 
-import android.content.Context
 import com.chatapp.horizon.models.ChatMessage
 import io.socket.client.IO
 import io.socket.client.Socket
 import kotlinx.coroutines.*
 import org.json.JSONObject
+import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 object MessageDispatchManager {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val pendingQueue = CopyOnWriteArrayList<ChatMessage>()
-    private val listeners = CopyOnWriteArrayList<MessageStatusListener>()
+    private val listeners = CopyOnWriteArrayList<MessageEventListener>()
 
     private var globalSocket: Socket? = null
     private var activeAuthToken: String = ""
-    private var activeUserId: Int = 1
+    private var activeServerUrl: String = ApiClient.BASE_URL.trimEnd('/')
 
-    interface MessageStatusListener {
-        fun onMessageDispatched(localClientId: String, serverMessage: ChatMessage)
-        fun onMessageStatusChanged(messageId: Long, newStatus: String)
-        fun onIncomingMessage(message: ChatMessage)
-        fun onMessageReacted(messageId: Long, reactions: Map<String, List<Int>>)
-        fun onMessageDeleted(messageId: Long, deletedForEveryone: Boolean, messageText: String?)
-        fun onMessagePinned(messageId: Long, isPinned: Boolean)
+    interface MessageEventListener {
+        fun onNewMessage(message: ChatMessage) {}
+        fun onMessageStatusUpdated(messageId: Long, localClientId: String?, status: String) {}
+        fun onMessageReactionUpdated(messageId: Long, reactions: Map<String, List<Int>>) {}
+        fun onMessagePinned(messageId: Long, isPinned: Boolean) {}
+        fun onMessageDeleted(messageId: Long, deletedForEveryone: Boolean, deletedByUsers: List<Int>) {}
+        fun onUserTyping(userId: Int, isTyping: Boolean) {}
+        fun onUserStatusChanged(userId: Int, status: String, lastSeen: String?) {}
+        fun onConversationRead(readerId: Int, partnerId: Int, readAt: String) {}
+        fun onMediaViewed(messageId: Long) {}
     }
 
-    fun addListener(listener: MessageStatusListener) {
+    fun addListener(listener: MessageEventListener) {
         if (!listeners.contains(listener)) {
             listeners.add(listener)
         }
     }
 
-    fun removeListener(listener: MessageStatusListener) {
+    fun removeListener(listener: MessageEventListener) {
         listeners.remove(listener)
     }
 
-    fun initSocket(authToken: String, userId: Int, serverUrl: String = ApiClient.BASE_URL.trimEnd('/')) {
+    fun initialize(authToken: String, serverUrl: String = ApiClient.BASE_URL.trimEnd('/')) {
+        if (authToken.isEmpty()) return
         activeAuthToken = authToken
-        activeUserId = userId
+        activeServerUrl = serverUrl
 
         if (globalSocket != null && globalSocket!!.connected()) {
             return
@@ -66,15 +69,17 @@ object MessageDispatchManager {
                     if (args.isNotEmpty()) {
                         val json = args[0] as? JSONObject ?: return@on
                         val msg = parseJsonMessage(json)
-                        listeners.forEach { it.onIncomingMessage(msg) }
+                        listeners.forEach { it.onNewMessage(msg) }
                     }
                 }
 
                 on("message_delivered_ack") { args ->
                     if (args.isNotEmpty()) {
                         val data = args[0] as? JSONObject
-                        val mId = data?.optLong("messageId") ?: return@on
-                        listeners.forEach { it.onMessageStatusChanged(mId, "DELIVERED") }
+                        val mId = data?.optLong("messageId", -1L) ?: -1L
+                        if (mId > 0) {
+                            listeners.forEach { it.onMessageStatusUpdated(mId, null, "DELIVERED") }
+                        }
                     }
                 }
 
@@ -83,12 +88,22 @@ object MessageDispatchManager {
                         val data = args[0] as? JSONObject
                         val mId = data?.optLong("messageId", -1L) ?: -1L
                         if (mId > 0) {
-                            listeners.forEach { it.onMessageStatusChanged(mId, "READ") }
+                            listeners.forEach { it.onMessageStatusUpdated(mId, null, "READ") }
                         }
                     }
                 }
 
-                on("message_reacted") { args ->
+                on("conversation_read") { args ->
+                    if (args.isNotEmpty()) {
+                        val data = args[0] as? JSONObject
+                        val readerId = data?.optInt("readerId", 0) ?: 0
+                        val partnerId = data?.optInt("partnerId", 0) ?: 0
+                        val readAt = data?.optString("readAt", "") ?: ""
+                        listeners.forEach { it.onConversationRead(readerId, partnerId, readAt) }
+                    }
+                }
+
+                on("message_reaction") { args ->
                     if (args.isNotEmpty()) {
                         val data = args[0] as? JSONObject ?: return@on
                         val mId = data.optLong("messageId")
@@ -104,7 +119,7 @@ object MessageDispatchManager {
                             }
                             reactionsMap[emoji] = userIds
                         }
-                        listeners.forEach { it.onMessageReacted(mId, reactionsMap) }
+                        listeners.forEach { it.onMessageReactionUpdated(mId, reactionsMap) }
                     }
                 }
 
@@ -113,8 +128,14 @@ object MessageDispatchManager {
                         val data = args[0] as? JSONObject ?: return@on
                         val mId = data.optLong("messageId")
                         val deletedForEveryone = data.optBoolean("deletedForEveryone", false)
-                        val text = data.optString("messageText", "🚫 This message was deleted")
-                        listeners.forEach { it.onMessageDeleted(mId, deletedForEveryone, text) }
+                        val deletedArr = data.optJSONArray("deletedByUsers")
+                        val deletedUsers = mutableListOf<Int>()
+                        if (deletedArr != null) {
+                            for (i in 0 until deletedArr.length()) {
+                                deletedUsers.add(deletedArr.optInt(i))
+                            }
+                        }
+                        listeners.forEach { it.onMessageDeleted(mId, deletedForEveryone, deletedUsers) }
                     }
                 }
 
@@ -127,6 +148,35 @@ object MessageDispatchManager {
                     }
                 }
 
+                on("user_typing") { args ->
+                    if (args.isNotEmpty()) {
+                        val data = args[0] as? JSONObject ?: return@on
+                        val uId = data.optInt("userId", data.optInt("senderId", 0))
+                        val isTyping = data.optBoolean("isTyping", false)
+                        listeners.forEach { it.onUserTyping(uId, isTyping) }
+                    }
+                }
+
+                on("user_status_changed") { args ->
+                    if (args.isNotEmpty()) {
+                        val data = args[0] as? JSONObject ?: return@on
+                        val uId = data.optInt("userId")
+                        val status = data.optString("status")
+                        val lastSeen = data.optString("lastSeen")
+                        listeners.forEach { it.onUserStatusChanged(uId, status, lastSeen) }
+                    }
+                }
+
+                on("media_viewed") { args ->
+                    if (args.isNotEmpty()) {
+                        val data = args[0] as? JSONObject ?: return@on
+                        val mId = data.optLong("messageId", -1L)
+                        if (mId > 0) {
+                            listeners.forEach { it.onMediaViewed(mId) }
+                        }
+                    }
+                }
+
                 connect()
             }
         } catch (e: Exception) {
@@ -134,17 +184,46 @@ object MessageDispatchManager {
         }
     }
 
-    fun getSocket(): Socket? = globalSocket
+    fun enqueueMessage(
+        currentUserId: Int,
+        recipientId: Int,
+        text: String,
+        attachmentType: String,
+        attachmentUrl: String?,
+        thumbnailBlur: String?,
+        fileSizeBytes: Long,
+        isViewOnce: Boolean,
+        replyToId: Long?
+    ): ChatMessage {
+        val tempId = System.currentTimeMillis()
+        val clientUid = UUID.randomUUID().toString()
 
-    fun enqueueMessage(message: ChatMessage) {
-        val clientUid = message.localClientId ?: UUID.randomUUID().toString()
-        message.localClientId = clientUid
-        message.status = "PENDING"
-        pendingQueue.add(message)
+        val optimisticMsg = ChatMessage(
+            id = tempId,
+            senderId = currentUserId,
+            recipientId = recipientId,
+            messageText = text,
+            attachmentType = attachmentType,
+            attachmentUrl = attachmentUrl,
+            thumbnailBlur = thumbnailBlur,
+            fileSizeBytes = fileSizeBytes,
+            status = "PENDING",
+            isViewOnce = isViewOnce,
+            isViewed = false,
+            replyToId = replyToId,
+            localClientId = clientUid,
+            createdAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.format(Date())
+        )
+
+        pendingQueue.add(optimisticMsg)
 
         scope.launch {
             processPendingQueue()
         }
+
+        return optimisticMsg
     }
 
     private suspend fun processPendingQueue() {
@@ -160,25 +239,25 @@ object MessageDispatchManager {
                 put("recipientId", pending.recipientId)
                 put("text", pending.messageText ?: "")
                 put("attachmentType", pending.attachmentType)
-                put("attachmentUrl", pending.attachmentUrl ?: JSONObject.NULL)
-                put("thumbnailBlur", pending.thumbnailBlur ?: JSONObject.NULL)
-                put("fileSizeBytes", pending.fileSizeBytes)
+                if (pending.attachmentUrl != null) put("attachmentUrl", pending.attachmentUrl)
+                if (pending.thumbnailBlur != null) put("thumbnailBlur", pending.thumbnailBlur)
+                if (pending.fileSizeBytes > 0) put("fileSizeBytes", pending.fileSizeBytes)
                 put("isViewOnce", pending.isViewOnce)
-                if (pending.replyToId != null) {
-                    put("replyToId", pending.replyToId)
-                }
+                if (pending.replyToId != null) put("replyToId", pending.replyToId)
+                put("localClientId", localId)
             }
 
             if (sock != null && sock.connected()) {
                 sock.emit("send_message", payload, io.socket.client.Ack { args ->
                     if (args.isNotEmpty()) {
                         val res = args[0] as? JSONObject
-                        if (res != null && res.optBoolean("success", false)) {
-                            val msgObj = res.optJSONObject("message")
-                            if (msgObj != null) {
-                                val saved = parseJsonMessage(msgObj)
-                                pendingQueue.remove(pending)
-                                listeners.forEach { it.onMessageDispatched(localId, saved) }
+                        val savedObj = res?.optJSONObject("message")
+                        if (savedObj != null) {
+                            val serverMsg = parseJsonMessage(savedObj)
+                            pendingQueue.remove(pending)
+                            listeners.forEach {
+                                it.onNewMessage(serverMsg)
+                                it.onMessageStatusUpdated(serverMsg.id, localId, "SENT")
                             }
                         }
                     }
@@ -187,26 +266,23 @@ object MessageDispatchManager {
         }
     }
 
-    fun emitReaction(messageId: Long, recipientId: Int, emoji: String) {
+    fun emitReaction(messageId: Long, emoji: String) {
         globalSocket?.emit("message_reaction", JSONObject().apply {
             put("messageId", messageId)
-            put("recipientId", recipientId)
             put("emoji", emoji)
         })
     }
 
-    fun emitDelete(messageId: Long, recipientId: Int, mode: String) {
+    fun emitDelete(messageId: Long, deleteForEveryone: Boolean) {
         globalSocket?.emit("delete_message", JSONObject().apply {
             put("messageId", messageId)
-            put("recipientId", recipientId)
-            put("mode", mode)
+            put("deleteForEveryone", deleteForEveryone)
         })
     }
 
-    fun emitPin(messageId: Long, recipientId: Int, isPinned: Boolean) {
+    fun emitPin(messageId: Long, isPinned: Boolean) {
         globalSocket?.emit("pin_message", JSONObject().apply {
             put("messageId", messageId)
-            put("recipientId", recipientId)
             put("isPinned", isPinned)
         })
     }
@@ -214,6 +290,37 @@ object MessageDispatchManager {
     fun emitBatchRead(partnerId: Int) {
         globalSocket?.emit("mark_conversation_read", JSONObject().apply {
             put("partnerId", partnerId)
+        })
+        scope.launch {
+            try {
+                if (activeAuthToken.isNotEmpty()) {
+                    ApiClient.apiService.batchMarkRead(
+                        token = "Bearer $activeAuthToken",
+                        request = mapOf("partnerId" to partnerId)
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun emitTypingStart(targetUserId: Int) {
+        globalSocket?.emit("typing_start", JSONObject().apply {
+            put("recipientId", targetUserId)
+        })
+    }
+
+    fun emitTypingStop(targetUserId: Int) {
+        globalSocket?.emit("typing_stop", JSONObject().apply {
+            put("recipientId", targetUserId)
+        })
+    }
+
+    fun emitMediaViewed(messageId: Long, recipientId: Int) {
+        globalSocket?.emit("mark_media_viewed", JSONObject().apply {
+            put("messageId", messageId)
+            put("recipientId", recipientId)
         })
     }
 
@@ -232,6 +339,7 @@ object MessageDispatchManager {
         val isPinned = json.optBoolean("is_pinned", false)
         val deletedForEveryone = json.optBoolean("deleted_for_everyone", false)
         val replyToId = if (json.has("reply_to_id") && !json.isNull("reply_to_id")) json.optLong("reply_to_id") else null
+        val localClientId = if (json.has("local_client_id") && !json.isNull("local_client_id")) json.optString("local_client_id") else null
         val createdAt = json.optString("created_at", json.optString("createdAt", ""))
 
         val reactions = mutableMapOf<String, List<Int>>()
@@ -261,6 +369,7 @@ object MessageDispatchManager {
             reactions = reactions,
             isPinned = isPinned,
             deletedForEveryone = deletedForEveryone,
+            localClientId = localClientId,
             createdAt = createdAt
         )
     }
