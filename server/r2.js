@@ -2,13 +2,8 @@ import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from 
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import dotenv from 'dotenv';
 
+// Ensure environment variables are loaded
 dotenv.config();
-
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'horizon-chat-media';
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || process.env.R2_PUBLIC_DOMAIN || '';
 
 /**
  * Storage Retention Policy:
@@ -17,18 +12,28 @@ const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || process.env.R2_PUBLIC_DOMAIN 
  * View-once state is tracked purely via database flags (`is_viewed`), preserving original media in R2.
  */
 
+export function getR2Config() {
+  return {
+    accountId: process.env.R2_ACCOUNT_ID || '',
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+    bucketName: process.env.R2_BUCKET_NAME || 'horizon-chat-media',
+    publicUrl: process.env.R2_PUBLIC_URL || process.env.R2_PUBLIC_DOMAIN || '',
+  };
+}
 
 /**
  * Check if Cloudflare R2 credentials are fully configured
  */
 export function isR2Configured() {
+  const { accountId, accessKeyId, secretAccessKey, bucketName } = getR2Config();
   return Boolean(
-    R2_ACCOUNT_ID &&
-    R2_ACCESS_KEY_ID &&
-    R2_SECRET_ACCESS_KEY &&
-    R2_BUCKET_NAME &&
-    !R2_ACCOUNT_ID.includes('your_') &&
-    !R2_ACCESS_KEY_ID.includes('your_')
+    accountId &&
+    accessKeyId &&
+    secretAccessKey &&
+    bucketName &&
+    !accountId.includes('your_') &&
+    !accessKeyId.includes('your_')
   );
 }
 
@@ -36,20 +41,26 @@ export function isR2Configured() {
  * Initialize and get Cloudflare R2 S3Client instance
  */
 let _s3Client = null;
+let _lastAccountId = null;
+let _lastAccessKeyId = null;
 
 export function getR2Client() {
   if (!isR2Configured()) {
     return null;
   }
-  if (!_s3Client) {
+  const { accountId, accessKeyId, secretAccessKey } = getR2Config();
+
+  if (!_s3Client || _lastAccountId !== accountId || _lastAccessKeyId !== accessKeyId) {
     _s3Client = new S3Client({
       region: 'auto',
-      endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
       credentials: {
-        accessKeyId: R2_ACCESS_KEY_ID,
-        secretAccessKey: R2_SECRET_ACCESS_KEY,
+        accessKeyId,
+        secretAccessKey,
       },
     });
+    _lastAccountId = accountId;
+    _lastAccessKeyId = accessKeyId;
   }
   return _s3Client;
 }
@@ -58,7 +69,7 @@ export function getR2Client() {
  * Get the R2 Bucket Name
  */
 export function getBucketName() {
-  return R2_BUCKET_NAME;
+  return getR2Config().bucketName;
 }
 
 /**
@@ -133,13 +144,14 @@ export function buildR2Key({
  */
 export function getR2PublicUrl(key) {
   if (!key) return '';
-  if (R2_PUBLIC_URL) {
-    const baseUrl = R2_PUBLIC_URL.replace(/\/+$/, '');
+  const { publicUrl, bucketName, accountId } = getR2Config();
+  if (publicUrl) {
+    const baseUrl = publicUrl.replace(/\/+$/, '');
     const cleanKey = key.replace(/^\/+/, '');
     return `${baseUrl}/${cleanKey}`;
   }
   // Fallback direct R2 endpoint if public domain is not configured
-  return `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+  return `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${key}`;
 }
 
 /**
@@ -155,9 +167,10 @@ export async function generatePresignedUploadUrl({ key, contentType, expiresIn =
   if (!client) {
     throw new Error('Cloudflare R2 is not configured. Missing or invalid credentials.');
   }
+  const { bucketName } = getR2Config();
 
   const command = new PutObjectCommand({
-    Bucket: R2_BUCKET_NAME,
+    Bucket: bucketName,
     Key: key,
     ContentType: contentType || 'application/octet-stream',
   });
@@ -184,9 +197,10 @@ export async function generatePresignedDownloadUrl({ key, expiresIn = 3600 }) {
   if (!client) {
     throw new Error('Cloudflare R2 is not configured. Missing or invalid credentials.');
   }
+  const { bucketName } = getR2Config();
 
   const command = new GetObjectCommand({
-    Bucket: R2_BUCKET_NAME,
+    Bucket: bucketName,
     Key: key,
   });
 
@@ -194,6 +208,7 @@ export async function generatePresignedDownloadUrl({ key, expiresIn = 3600 }) {
 }
 
 export default {
+  getR2Config,
   isR2Configured,
   getR2Client,
   getBucketName,
