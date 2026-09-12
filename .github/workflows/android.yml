@@ -1,6 +1,8 @@
 name: Build Horizon Chat Android APK
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -57,8 +59,9 @@ jobs:
           path: /tmp/dist/*.apk
           retention-days: 30
 
-      - name: Publish GitHub Release Asset
+      - name: Clean Previous Releases & Publish GitHub Release Asset
         run: |
+          gh release delete v2.0-latest --yes --cleanup-tag || true
           gh release create v2.1-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.1.0.apk \
             --title "Horizon Chat v2.1.0 Phase 2C Release" \
             --notes "Horizon Chat v2.1.0 featuring Background Message Dispatch Queue, Real-Time Delivery Ticks, Emoji Reactions, Contextual Action Menu, Deterministic Avatar Fallbacks, Dynamic User Search, Relative Last Seen, and Heads-Up Push Notifications." \
