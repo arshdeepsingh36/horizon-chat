@@ -52,7 +52,7 @@ jobs:
           cp /tmp/gradle_output.txt ./build_error.log || echo "No log file found" > ./build_error.log
           git add build_error.log
           git commit -m "ci: capture build error log" --allow-empty
-          git push origin build-logs --force
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git build-logs --force
 
       - name: Prepare Distribution Files
         run: |
