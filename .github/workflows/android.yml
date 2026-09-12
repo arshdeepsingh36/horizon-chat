@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -41,7 +44,7 @@ jobs:
         working-directory: ./android
         run: |
           set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_output.txt
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build_error.log
 
       - name: Push Error Log to Git
         if: failure()
@@ -49,10 +52,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -B build-logs
-          cp /tmp/gradle_output.txt ./build_error.log || echo "No log file found" > ./build_error.log
           git add build_error.log
           git commit -m "ci: capture build error log" --allow-empty
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git build-logs --force
+          git push origin build-logs --force
 
       - name: Prepare Distribution Files
         run: |
