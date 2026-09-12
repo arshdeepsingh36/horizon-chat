@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS messages (
     message_text TEXT,
     attachment_type VARCHAR(20) DEFAULT 'NONE', -- 'NONE', 'IMAGE', 'VIDEO', 'AUDIO', 'LOCATION', 'DOCUMENT'
     attachment_url TEXT,
+    r2_key TEXT,                                -- Cloudflare R2 object storage key
     thumbnail_blur TEXT,                        -- Base64 micro-preview (~200 bytes)
     file_size_bytes BIGINT DEFAULT 0,
     status VARCHAR(16) DEFAULT 'SENT',          -- 'SENT', 'DELIVERED', 'READ'
@@ -61,5 +62,7 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bio_status TEXT DEFAULT 'Hey there
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS r2_key TEXT;
+
 
 

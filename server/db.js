@@ -45,6 +45,7 @@ export async function initDb() {
         message_text TEXT,
         attachment_type VARCHAR(20) DEFAULT 'NONE',
         attachment_url TEXT,
+        r2_key TEXT,
         thumbnail_blur TEXT,
         file_size_bytes BIGINT DEFAULT 0,
         status VARCHAR(16) DEFAULT 'SENT',
@@ -63,6 +64,7 @@ export async function initDb() {
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS r2_key TEXT;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions TEXT DEFAULT '{}';
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
@@ -146,6 +148,7 @@ export async function initDb() {
             tryAdd("ALTER TABLE accounts ADD COLUMN last_seen DATETIME");
             tryAdd("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
             tryAdd("ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0");
+            tryAdd("ALTER TABLE messages ADD COLUMN r2_key TEXT");
             tryAdd("ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '{}'");
             tryAdd("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0");
             tryAdd("ALTER TABLE messages ADD COLUMN deleted_for_everyone INTEGER DEFAULT 0");
@@ -471,6 +474,8 @@ function formatMessage(r) {
   const displayText = deletedForEveryone ? '🚫 This message was deleted' : rawText;
   const displayAttachmentType = deletedForEveryone ? 'NONE' : attachmentType;
   const displayAttachmentUrl = deletedForEveryone ? null : attachmentUrl;
+  const r2Key = r.r2_key ?? r.r2Key ?? null;
+  const displayR2Key = deletedForEveryone ? null : r2Key;
   const displayThumbnailBlur = deletedForEveryone ? null : thumbnailBlur;
   const displayFileSize = deletedForEveryone ? 0 : fileSizeBytes;
 
@@ -487,6 +492,10 @@ function formatMessage(r) {
     attachment_type: displayAttachmentType,
     attachmentUrl: displayAttachmentUrl,
     attachment_url: displayAttachmentUrl,
+    mediaUrl: displayAttachmentUrl,
+    media_url: displayAttachmentUrl,
+    r2Key: displayR2Key,
+    r2_key: displayR2Key,
     thumbnailBlur: displayThumbnailBlur,
     thumbnail_blur: displayThumbnailBlur,
     fileSizeBytes: displayFileSize,
@@ -519,7 +528,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
           AND id < $3
@@ -529,7 +538,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE (sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1)
         ORDER BY id DESC
@@ -547,7 +556,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
           AND id < ?
@@ -557,7 +566,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, targetUserId, currentUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
         ORDER BY id DESC
@@ -584,31 +593,37 @@ export async function saveMessageTRD({
   text, 
   attachmentType = 'NONE', 
   attachmentUrl = null, 
+  mediaUrl = null,
+  r2Key = null,
+  r2_key = null,
   thumbnailBlur = null, 
   fileSizeBytes = 0, 
   status = 'SENT', 
   isViewOnce = false,
   replyToId = null 
 }) {
+  const finalAttachmentUrl = mediaUrl || attachmentUrl;
+  const finalR2Key = r2Key || r2_key || null;
+
   if (isPg) {
     const res = await pgPool.query(
-      `INSERT INTO messages (sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10)
-       RETURNING id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at`,
-      [senderId, recipientId, text, attachmentType, attachmentUrl, thumbnailBlur, fileSizeBytes, status, isViewOnce, replyToId]
+      `INSERT INTO messages (sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
+       RETURNING id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at`,
+      [senderId, recipientId, text, attachmentType, finalAttachmentUrl, finalR2Key, thumbnailBlur, fileSizeBytes, status, isViewOnce, replyToId]
     );
     return formatMessage(res.rows[0]);
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.run(
-        `INSERT INTO messages (sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-        [senderId, recipientId, text, attachmentType, attachmentUrl, thumbnailBlur, fileSizeBytes, status, isViewOnce ? 1 : 0, replyToId],
+        `INSERT INTO messages (sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        [senderId, recipientId, text, attachmentType, finalAttachmentUrl, finalR2Key, thumbnailBlur, fileSizeBytes, status, isViewOnce ? 1 : 0, replyToId],
         function (err) {
           if (err) return reject(err);
           const newId = this.lastID;
           sqliteDb.get(
-            `SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at FROM messages WHERE id = ?`,
+            `SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at FROM messages WHERE id = ?`,
             [newId],
             (err2, row) => {
               if (err2) return reject(err2);

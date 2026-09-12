@@ -6,8 +6,6 @@ import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   initDb,
   findUserByUsername,
@@ -33,23 +31,19 @@ import {
   pinMessage,
   markConversationRead
 } from './db.js';
+import {
+  isR2Configured,
+  getR2Client,
+  buildR2Key,
+  generatePresignedUploadUrl,
+  getR2PublicUrl
+} from './r2.js';
 
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'horizon_chat_secure_secret_2026_q4';
 
-// Cloudflare R2 Client (Zero-Cost Egress Storage)
-const r2Client = (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY)
-  ? new S3Client({
-      region: 'auto',
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY
-      }
-    })
-  : null;
 
 import fs from 'fs';
 import path from 'path';
@@ -359,7 +353,49 @@ app.put('/api/users/password', authenticateToken, async (req, res) => {
   }
 });
 
-// 3e. Moderation: Block User (Phase 2b)
+// 3e. Storage: Generate Cloudflare R2 Presigned Upload URL (Phase 3)
+app.post('/api/upload/presigned-url', authenticateToken, async (req, res) => {
+  try {
+    const { uploadType, recipientUsername, mediaType, fileName, contentType, isViewOnce } = req.body || {};
+
+    if (!isR2Configured()) {
+      return res.status(503).json({
+        error: 'Cloudflare R2 storage is not configured or missing credentials on the server.',
+        configured: false
+      });
+    }
+
+    const key = buildR2Key({
+      username: req.user.username,
+      uploadType: uploadType || (mediaType === 'pfp' ? 'pfp' : 'chat_media'),
+      recipientUsername: recipientUsername || 'general',
+      mediaType: mediaType || 'image',
+      fileName: fileName || 'file.bin',
+      contentType: contentType || 'application/octet-stream',
+      isViewOnce: Boolean(isViewOnce)
+    });
+
+    const { uploadUrl, publicUrl } = await generatePresignedUploadUrl({
+      key,
+      contentType: contentType || 'application/octet-stream',
+      expiresIn: 3600
+    });
+
+    return res.json({
+      success: true,
+      uploadUrl,
+      key,
+      publicUrl,
+      mediaType: mediaType || 'image',
+      isViewOnce: Boolean(isViewOnce)
+    });
+  } catch (err) {
+    console.error('[PRESIGNED URL ERROR]', err);
+    return res.status(500).json({ error: err.message || 'Failed to generate presigned upload URL' });
+  }
+});
+
+// 3f. Moderation: Block User (Phase 2b)
 app.post('/api/users/block', authenticateToken, async (req, res) => {
   try {
     const { targetUserId } = req.body || {};
@@ -613,6 +649,9 @@ io.on('connection', (socket) => {
       text,
       attachmentType = 'NONE',
       attachmentUrl = null,
+      mediaUrl = null,
+      r2Key = null,
+      r2_key = null,
       thumbnailBlur = null,
       fileSizeBytes = 0,
       isViewOnce = false,
@@ -640,12 +679,12 @@ io.on('connection', (socket) => {
     const initialStatus = recipientOnline ? 'DELIVERED' : 'SENT';
 
     // Auto-save direct Base64 Data URL to uploads directory (Images, Audio, and Video)
-    let finalAttachmentUrl = attachmentUrl;
-    if (attachmentUrl && typeof attachmentUrl === 'string' && (attachmentUrl.startsWith('data:image/') || attachmentUrl.startsWith('data:audio/') || attachmentUrl.startsWith('data:video/'))) {
+    let finalAttachmentUrl = mediaUrl || attachmentUrl;
+    if (finalAttachmentUrl && typeof finalAttachmentUrl === 'string' && (finalAttachmentUrl.startsWith('data:image/') || finalAttachmentUrl.startsWith('data:audio/') || finalAttachmentUrl.startsWith('data:video/'))) {
       try {
-        const isVideo = attachmentUrl.startsWith('data:video/');
-        const isAudio = attachmentUrl.startsWith('data:audio/');
-        const matches = attachmentUrl.match(/^data:([A-Za-z0-9\-\+\.\/]+);base64,(.+)$/s);
+        const isVideo = finalAttachmentUrl.startsWith('data:video/');
+        const isAudio = finalAttachmentUrl.startsWith('data:audio/');
+        const matches = finalAttachmentUrl.match(/^data:([A-Za-z0-9\-\+\.\/]+);base64,(.+)$/s);
         let ext = isVideo ? 'mp4' : (isAudio ? 'm4a' : 'jpg');
         let buf;
         if (matches && matches.length === 3) {
@@ -659,7 +698,7 @@ io.on('connection', (socket) => {
           else if (mime.includes('wav')) ext = 'wav';
           buf = Buffer.from(matches[2], 'base64');
         } else {
-          const cleanBase64 = attachmentUrl.includes('base64,') ? attachmentUrl.split('base64,')[1] : attachmentUrl;
+          const cleanBase64 = finalAttachmentUrl.includes('base64,') ? finalAttachmentUrl.split('base64,')[1] : finalAttachmentUrl;
           buf = Buffer.from(cleanBase64, 'base64');
         }
         const prefix = isVideo ? 'vid' : (isAudio ? 'voice' : 'img');
@@ -680,6 +719,7 @@ io.on('connection', (socket) => {
         text: text || '',
         attachmentType,
         attachmentUrl: finalAttachmentUrl,
+        r2Key: r2Key || r2_key || null,
         thumbnailBlur,
         fileSizeBytes,
         status: initialStatus,
