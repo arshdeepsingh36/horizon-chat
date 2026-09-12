@@ -1,6 +1,9 @@
 name: Build Horizon Chat Android APK
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -47,7 +50,7 @@ jobs:
         run: |
           mkdir -p /tmp/dist
           cp android/app/build/outputs/apk/debug/*.apk /tmp/dist/app-debug.apk
-          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.1.0.apk
+          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v3.0.0.apk
           ls -la /tmp/dist/
 
       - name: Upload APK Artifact
@@ -57,20 +60,14 @@ jobs:
           path: /tmp/dist/*.apk
           retention-days: 30
 
-      - name: Clean Old Releases
-        run: |
-          gh release delete v2.0-latest --yes 2>/dev/null || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1-latest
-          name: "Horizon Chat v2.1.0 Phase 2C Release"
-          body: "Horizon Chat v2.1.0 featuring Background Message Dispatch Queue, Real-Time Delivery Ticks, Emoji Reactions, Contextual Action Menu, Deterministic Avatar Fallbacks, Dynamic User Search, Relative Last Seen, and Heads-Up Push Notifications."
+          tag_name: ${{ github.ref_name || 'v3.0-latest' }}
+          name: "Horizon Chat v3.0.0 Phase 3 Release"
+          body: "Horizon Chat v3.0.0 featuring Cloudflare R2 Direct Media Storage, Permanent Media Retention, Multi-Format Attachments (Photos, Videos, Audio Notes, Documents), 1-View Mode, and Muted High-Contrast Professional Theme."
           files: |
             /tmp/dist/app-debug.apk
-            /tmp/dist/horizon-chat-v2.1.0.apk
+            /tmp/dist/horizon-chat-v3.0.0.apk
           token: ${{ secrets.GITHUB_TOKEN }}
 
