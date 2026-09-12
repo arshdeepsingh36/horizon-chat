@@ -134,23 +134,22 @@ class UserProfileActivity : AppCompatActivity() {
         binding.tvUsernameHandle.text = "@$targetUsername"
         binding.tvBioStatus.text = targetBioStatus
 
+        binding.tvLastSeen.text = com.chatapp.horizon.utils.TimeFormatHelper.formatLastSeen(targetLastSeen, isTargetOnline)
         if (isTargetOnline) {
-            binding.tvLastSeen.text = "Online"
             binding.tvLastSeen.setTextColor(ContextCompat.getColor(this, R.color.ticks_sent))
         } else {
-            binding.tvLastSeen.text = formatLastSeen(targetLastSeen)
             binding.tvLastSeen.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
         }
 
-        if (!targetAvatarUrl.isNullOrEmpty()) {
-            binding.tvAvatarInitials.visibility = View.GONE
-            binding.ivUserAvatar.visibility = View.VISIBLE
-            Glide.with(this)
-                .load(targetAvatarUrl)
-                .circleCrop()
-                .placeholder(android.R.drawable.sym_def_app_icon)
-                .into(binding.ivUserAvatar)
-            binding.ivUserAvatar.setOnClickListener {
+        com.chatapp.horizon.utils.AvatarHelper.setupAvatar(
+            imageView = binding.ivUserAvatar,
+            initialsView = binding.tvAvatarInitials,
+            avatarUrl = targetAvatarUrl,
+            name = if (targetDisplayName.isNotEmpty()) targetDisplayName else targetUsername
+        )
+
+        binding.ivUserAvatar.setOnClickListener {
+            if (!targetAvatarUrl.isNullOrEmpty()) {
                 val intent = Intent(this, PhotoViewerActivity::class.java).apply {
                     putExtra("PHOTO_URL", targetAvatarUrl)
                     putExtra("PHOTO_TITLE", "Profile Photo")
@@ -158,10 +157,6 @@ class UserProfileActivity : AppCompatActivity() {
                 }
                 startActivity(intent)
             }
-        } else {
-            binding.ivUserAvatar.visibility = View.GONE
-            binding.tvAvatarInitials.visibility = View.VISIBLE
-            binding.tvAvatarInitials.text = targetUsername.take(2).uppercase()
         }
 
         binding.tvBlockLabel.text = if (isTargetBlocked) "Unblock @$targetUsername" else "Block @$targetUsername"

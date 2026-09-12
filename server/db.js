@@ -63,6 +63,10 @@ export async function initDb() {
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions TEXT DEFAULT '{}';
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by_users TEXT DEFAULT '[]';
 
       CREATE TABLE IF NOT EXISTS user_blocks (
         id SERIAL PRIMARY KEY,
@@ -142,6 +146,10 @@ export async function initDb() {
             tryAdd("ALTER TABLE accounts ADD COLUMN last_seen DATETIME");
             tryAdd("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
             tryAdd("ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0");
+            tryAdd("ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '{}'");
+            tryAdd("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0");
+            tryAdd("ALTER TABLE messages ADD COLUMN deleted_for_everyone INTEGER DEFAULT 0");
+            tryAdd("ALTER TABLE messages ADD COLUMN deleted_by_users TEXT DEFAULT '[]'");
 
             sqliteDb.run(`
               CREATE TABLE IF NOT EXISTS user_blocks (
@@ -424,10 +432,10 @@ export async function updateUserPassword(userId, newPasswordHash) {
   }
 }
 
-// Cursor-based Pagination Query (TRD v2.0.0 + Phase 2)
+// Cursor-based Pagination Query (TRD v2.0.0 + Phase 2 + Phase 2C)
 function formatMessage(r) {
   if (!r) return null;
-  const text = r.message_text ?? r.text ?? r.messageText ?? '';
+  const rawText = r.message_text ?? r.text ?? r.messageText ?? '';
   const senderId = Number(r.sender_id ?? r.senderId);
   const recipientId = Number(r.recipient_id ?? r.recipientId);
   const createdAt = r.created_at ?? r.createdAt;
@@ -441,30 +449,63 @@ function formatMessage(r) {
   const replyToId = r.reply_to_id ? Number(r.reply_to_id) : (r.replyToId ? Number(r.replyToId) : null);
   const id = Number(r.id);
 
+  const isPinned = Boolean(r.is_pinned ?? r.isPinned);
+  const deletedForEveryone = Boolean(r.deleted_for_everyone ?? r.deletedForEveryone);
+
+  let reactions = {};
+  try {
+    const rRaw = r.reactions;
+    reactions = typeof rRaw === 'string' ? JSON.parse(rRaw || '{}') : (rRaw || {});
+  } catch (e) {
+    reactions = {};
+  }
+
+  let deletedByUsers = [];
+  try {
+    const dRaw = r.deleted_by_users;
+    deletedByUsers = typeof dRaw === 'string' ? JSON.parse(dRaw || '[]') : (dRaw || []);
+  } catch (e) {
+    deletedByUsers = [];
+  }
+
+  const displayText = deletedForEveryone ? '🚫 This message was deleted' : rawText;
+  const displayAttachmentType = deletedForEveryone ? 'NONE' : attachmentType;
+  const displayAttachmentUrl = deletedForEveryone ? null : attachmentUrl;
+  const displayThumbnailBlur = deletedForEveryone ? null : thumbnailBlur;
+  const displayFileSize = deletedForEveryone ? 0 : fileSizeBytes;
+
   return {
     id,
     senderId,
     sender_id: senderId,
     recipientId,
     recipient_id: recipientId,
-    text,
-    messageText: text,
-    message_text: text,
-    attachmentType,
-    attachment_type: attachmentType,
-    attachmentUrl,
-    attachment_url: attachmentUrl,
-    thumbnailBlur,
-    thumbnail_blur: thumbnailBlur,
-    fileSizeBytes,
-    file_size_bytes: fileSizeBytes,
+    text: displayText,
+    messageText: displayText,
+    message_text: displayText,
+    attachmentType: displayAttachmentType,
+    attachment_type: displayAttachmentType,
+    attachmentUrl: displayAttachmentUrl,
+    attachment_url: displayAttachmentUrl,
+    thumbnailBlur: displayThumbnailBlur,
+    thumbnail_blur: displayThumbnailBlur,
+    fileSizeBytes: displayFileSize,
+    file_size_bytes: displayFileSize,
     status,
     isViewOnce,
     is_view_once: isViewOnce,
     isViewed,
+    is_view_viewed: isViewed,
     is_viewed: isViewed,
     replyToId,
     reply_to_id: replyToId,
+    reactions,
+    isPinned,
+    is_pinned: isPinned,
+    deletedForEveryone,
+    deleted_for_everyone: deletedForEveryone,
+    deletedByUsers,
+    deleted_by_users: deletedByUsers,
     createdAt,
     created_at: createdAt
   };
@@ -478,7 +519,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
           AND id < $3
@@ -488,7 +529,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE (sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1)
         ORDER BY id DESC
@@ -497,13 +538,16 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, safeLimit];
     }
     const res = await pgPool.query(query, params);
-    return res.rows.reverse().map(formatMessage);
+    return res.rows
+      .map(formatMessage)
+      .filter(m => !m.deletedByUsers.includes(Number(currentUserId)))
+      .reverse();
   } else {
     let query;
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
           AND id < ?
@@ -513,7 +557,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, targetUserId, currentUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
         FROM messages
         WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
         ORDER BY id DESC
@@ -524,7 +568,11 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     return new Promise((resolve, reject) => {
       sqliteDb.all(query, params, (err, rows) => {
         if (err) return reject(err);
-        resolve((rows || []).reverse().map(formatMessage));
+        const mapped = (rows || [])
+          .map(formatMessage)
+          .filter(m => !m.deletedByUsers.includes(Number(currentUserId)))
+          .reverse();
+        resolve(mapped);
       });
     });
   }
@@ -659,3 +707,210 @@ export async function getUserConversations(currentUserId) {
 
   return list;
 }
+
+export async function searchUsers(query, currentUserId) {
+  const clean = `%${(query || '').trim().toLowerCase()}%`;
+  if (isPg) {
+    const res = await pgPool.query(
+      `SELECT id, username, display_name, bio_status, avatar_url, last_seen
+       FROM accounts
+       WHERE id != $1 AND (LOWER(username) LIKE $2 OR LOWER(COALESCE(display_name, '')) LIKE $2)
+       ORDER BY username ASC
+       LIMIT 20`,
+      [currentUserId, clean]
+    );
+    return res.rows;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.all(
+        `SELECT id, username, display_name, bio_status, avatar_url, last_seen
+         FROM accounts
+         WHERE id != ? AND (LOWER(username) LIKE ? OR LOWER(COALESCE(display_name, '')) LIKE ?)
+         ORDER BY username ASC
+         LIMIT 20`,
+        [currentUserId, clean, clean],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(rows || []);
+        }
+      );
+    });
+  }
+}
+
+export async function toggleMessageReaction(messageId, userId, emoji) {
+  let messageRow;
+  if (isPg) {
+    const res = await pgPool.query('SELECT * FROM messages WHERE id = $1', [messageId]);
+    messageRow = res.rows[0];
+  } else {
+    messageRow = await new Promise((resolve, reject) => {
+      sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err, row) => {
+        if (err) return reject(err);
+        resolve(row);
+      });
+    });
+  }
+
+  if (!messageRow) return null;
+
+  let reactions = {};
+  try {
+    const rRaw = messageRow.reactions;
+    reactions = typeof rRaw === 'string' ? JSON.parse(rRaw || '{}') : (rRaw || {});
+  } catch (e) {
+    reactions = {};
+  }
+
+  const uId = Number(userId);
+
+  // If user already reacted with this emoji, toggle it off
+  if (reactions[emoji] && Array.isArray(reactions[emoji]) && reactions[emoji].includes(uId)) {
+    reactions[emoji] = reactions[emoji].filter(id => id !== uId);
+    if (reactions[emoji].length === 0) {
+      delete reactions[emoji];
+    }
+  } else {
+    // Remove user from any other emoji reactions first (WhatsApp style: 1 reaction per user)
+    for (const [e, users] of Object.entries(reactions)) {
+      if (Array.isArray(users)) {
+        reactions[e] = users.filter(id => id !== uId);
+        if (reactions[e].length === 0) {
+          delete reactions[e];
+        }
+      }
+    }
+    if (!reactions[emoji]) reactions[emoji] = [];
+    reactions[emoji].push(uId);
+  }
+
+  const jsonStr = JSON.stringify(reactions);
+  if (isPg) {
+    const res = await pgPool.query(
+      'UPDATE messages SET reactions = $1 WHERE id = $2 RETURNING *',
+      [jsonStr, messageId]
+    );
+    return formatMessage(res.rows[0]);
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run('UPDATE messages SET reactions = ? WHERE id = ?', [jsonStr, messageId], function(err) {
+        if (err) return reject(err);
+        sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
+          if (err2) return reject(err2);
+          resolve(formatMessage(row));
+        });
+      });
+    });
+  }
+}
+
+export async function deleteMessage(messageId, userId, mode = 'me') {
+  let messageRow;
+  if (isPg) {
+    const res = await pgPool.query('SELECT * FROM messages WHERE id = $1', [messageId]);
+    messageRow = res.rows[0];
+  } else {
+    messageRow = await new Promise((resolve, reject) => {
+      sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err, row) => {
+        if (err) return reject(err);
+        resolve(row);
+      });
+    });
+  }
+
+  if (!messageRow) return null;
+  const uId = Number(userId);
+
+  if (mode === 'everyone') {
+    if (isPg) {
+      const res = await pgPool.query(
+        'UPDATE messages SET deleted_for_everyone = TRUE, message_text = $1 WHERE id = $2 RETURNING *',
+        ['🚫 This message was deleted', messageId]
+      );
+      return formatMessage(res.rows[0]);
+    } else {
+      return new Promise((resolve, reject) => {
+        sqliteDb.run('UPDATE messages SET deleted_for_everyone = 1, message_text = ? WHERE id = ?', ['🚫 This message was deleted', messageId], function(err) {
+          if (err) return reject(err);
+          sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
+            if (err2) return reject(err2);
+            resolve(formatMessage(row));
+          });
+        });
+      });
+    }
+  } else {
+    // Delete for me
+    let deletedByUsers = [];
+    try {
+      const dRaw = messageRow.deleted_by_users;
+      deletedByUsers = typeof dRaw === 'string' ? JSON.parse(dRaw || '[]') : (dRaw || []);
+    } catch (e) {
+      deletedByUsers = [];
+    }
+    if (!deletedByUsers.includes(uId)) {
+      deletedByUsers.push(uId);
+    }
+    const jsonStr = JSON.stringify(deletedByUsers);
+
+    if (isPg) {
+      const res = await pgPool.query(
+        'UPDATE messages SET deleted_by_users = $1 WHERE id = $2 RETURNING *',
+        [jsonStr, messageId]
+      );
+      return formatMessage(res.rows[0]);
+    } else {
+      return new Promise((resolve, reject) => {
+        sqliteDb.run('UPDATE messages SET deleted_by_users = ? WHERE id = ?', [jsonStr, messageId], function(err) {
+          if (err) return reject(err);
+          sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
+            if (err2) return reject(err2);
+            resolve(formatMessage(row));
+          });
+        });
+      });
+    }
+  }
+}
+
+export async function pinMessage(messageId, isPinned = true) {
+  if (isPg) {
+    const res = await pgPool.query(
+      'UPDATE messages SET is_pinned = $1 WHERE id = $2 RETURNING *',
+      [Boolean(isPinned), messageId]
+    );
+    return formatMessage(res.rows[0]);
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run('UPDATE messages SET is_pinned = ? WHERE id = ?', [isPinned ? 1 : 0, messageId], function(err) {
+        if (err) return reject(err);
+        sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
+          if (err2) return reject(err2);
+          resolve(formatMessage(row));
+        });
+      });
+    });
+  }
+}
+
+export async function markConversationRead(currentUserId, partnerId) {
+  if (isPg) {
+    await pgPool.query(
+      "UPDATE messages SET status = 'READ' WHERE sender_id = $1 AND recipient_id = $2 AND status != 'READ'",
+      [partnerId, currentUserId]
+    );
+    return true;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        "UPDATE messages SET status = 'READ' WHERE sender_id = ? AND recipient_id = ? AND status != 'READ'",
+        [partnerId, currentUserId],
+        (err) => {
+          if (err) return reject(err);
+          resolve(true);
+        }
+      );
+    });
+  }
+}
+

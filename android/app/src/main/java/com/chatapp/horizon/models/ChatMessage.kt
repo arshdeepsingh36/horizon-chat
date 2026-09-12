@@ -4,7 +4,7 @@ import com.google.gson.annotations.SerializedName
 
 data class ChatMessage(
     @SerializedName("id")
-    val id: Long,
+    var id: Long,
 
     @SerializedName("sender_id")
     val senderId: Int,
@@ -13,13 +13,13 @@ data class ChatMessage(
     val recipientId: Int,
 
     @SerializedName("message_text")
-    val messageText: String? = null,
+    var messageText: String? = null,
 
     @SerializedName("attachment_type")
-    val attachmentType: String = "NONE", // NONE, IMAGE, FILE, AUDIO
+    var attachmentType: String = "NONE", // NONE, IMAGE, VIDEO, AUDIO, LOCATION, DOCUMENT
 
     @SerializedName("attachment_url")
-    val attachmentUrl: String? = null,
+    var attachmentUrl: String? = null,
 
     @SerializedName("thumbnail_blur")
     val thumbnailBlur: String? = null, // Base64 micro-thumbnail (~200 bytes)
@@ -28,7 +28,7 @@ data class ChatMessage(
     val fileSizeBytes: Long = 0,
 
     @SerializedName("status")
-    var status: String = "SENT", // SENT, DELIVERED, READ
+    var status: String = "SENT", // PENDING, SENT, DELIVERED, READ
 
     @SerializedName("is_view_once")
     val isViewOnce: Boolean = false,
@@ -38,6 +38,18 @@ data class ChatMessage(
 
     @SerializedName("reply_to_id")
     val replyToId: Long? = null,
+
+    @SerializedName("reactions")
+    var reactions: Map<String, List<Int>> = emptyMap(),
+
+    @SerializedName("is_pinned")
+    var isPinned: Boolean = false,
+
+    @SerializedName("deleted_for_everyone")
+    var deletedForEveryone: Boolean = false,
+
+    @SerializedName("local_client_id")
+    var localClientId: String? = null,
 
     @SerializedName("created_at")
     val createdAt: String

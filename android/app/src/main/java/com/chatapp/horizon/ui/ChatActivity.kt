@@ -3,6 +3,9 @@ package com.chatapp.horizon.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Dialog
+import android.app.DownloadManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -24,6 +27,7 @@ import android.view.*
 import android.webkit.MimeTypeMap
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -34,28 +38,29 @@ import com.bumptech.glide.Glide
 import com.chatapp.horizon.R
 import com.chatapp.horizon.databinding.ActivityChatBinding
 import com.chatapp.horizon.databinding.DialogAttachmentPickerBinding
+import com.chatapp.horizon.databinding.DialogMessageContextMenuBinding
 import com.chatapp.horizon.models.*
 import com.chatapp.horizon.network.ApiClient
+import com.chatapp.horizon.network.MessageDispatchManager
+import com.chatapp.horizon.utils.AvatarHelper
+import com.chatapp.horizon.utils.HorizonNotificationManager
+import com.chatapp.horizon.utils.TimeFormatHelper
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import io.socket.client.IO
-import io.socket.client.Socket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
-class ChatActivity : AppCompatActivity() {
+class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventListener {
 
     private lateinit var binding: ActivityChatBinding
     private lateinit var adapter: ChatAdapter
-    private var mSocket: Socket? = null
 
     private var currentUserId: Int = 1
     private var targetUserId: Int = 2
@@ -70,7 +75,8 @@ class ChatActivity : AppCompatActivity() {
 
     private var isLoadingOlder = false
     private var isViewOnceActive = false
-    private var cachedMessageList = mutableListOf<ChatMessage>()
+    private val cachedMessageList = mutableListOf<ChatMessage>()
+    private var activeQuotedMessage: ChatMessage? = null
 
     // Typing Debounce
     private val typingHandler = Handler(Looper.getMainLooper())
@@ -166,6 +172,7 @@ class ChatActivity : AppCompatActivity() {
             if (cleared) {
                 adapter.setMessages(emptyList())
                 cachedMessageList.clear()
+                updatePinnedBannerUI()
             }
             val searchTriggered = result.data?.getBooleanExtra("ACTION_SEARCH", false) ?: false
             if (searchTriggered) {
@@ -180,18 +187,32 @@ class ChatActivity : AppCompatActivity() {
         binding = ActivityChatBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        currentUserId = intent.getIntExtra("CURRENT_USER_ID", 1)
+        val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
+        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("token", "") ?: ""
+        currentUserId = intent.getIntExtra("CURRENT_USER_ID", prefs.getInt("userId", 1))
         targetUserId = intent.getIntExtra("TARGET_USER_ID", 2)
         targetUsername = intent.getStringExtra("TARGET_USERNAME") ?: "User"
         targetDisplayName = intent.getStringExtra("TARGET_DISPLAY_NAME") ?: targetUsername
         targetAvatarUrl = intent.getStringExtra("TARGET_AVATAR_URL")
         targetBioStatus = intent.getStringExtra("TARGET_BIO_STATUS") ?: ""
-        authToken = intent.getStringExtra("AUTH_TOKEN") ?: ""
 
         setupUI()
-        setupSocket()
+        setupMessageDispatcher()
         refreshTargetUserProfile()
         loadInitialMessages()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        HorizonNotificationManager.activeChatPartnerId = targetUserId
+        if (authToken.isNotEmpty()) {
+            MessageDispatchManager.emitBatchRead(targetUserId)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        HorizonNotificationManager.activeChatPartnerId = null
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -218,9 +239,31 @@ class ChatActivity : AppCompatActivity() {
         }
         binding.layoutToolbarProfileHeader.setOnClickListener(openProfileListener)
         binding.ivRecipientAvatar.setOnClickListener(openProfileListener)
+        binding.tvRecipientAvatarInitials.setOnClickListener(openProfileListener)
         binding.tvRecipientName.setOnClickListener(openProfileListener)
         binding.tvPresence.setOnClickListener(openProfileListener)
         binding.btnInfoProfile.setOnClickListener(openProfileListener)
+
+        // Quoted Reply cancel button
+        binding.btnCancelReply.setOnClickListener {
+            clearActiveReply()
+        }
+
+        // Pinned message banner close button
+        binding.btnClosePinned.setOnClickListener {
+            binding.layoutPinnedBanner.visibility = View.GONE
+        }
+
+        // Pinned message banner click -> scroll to pinned message
+        binding.layoutPinnedBanner.setOnClickListener {
+            val pinnedMsg = cachedMessageList.find { it.isPinned }
+            if (pinnedMsg != null) {
+                val index = cachedMessageList.indexOfFirst { it.id == pinnedMsg.id }
+                if (index != -1) {
+                    binding.rvChatMessages.smoothScrollToPosition(index)
+                }
+            }
+        }
 
         // Toolbar In-Chat Search Button Toggle
         binding.btnSearchChat.setOnClickListener {
@@ -268,7 +311,8 @@ class ChatActivity : AppCompatActivity() {
             onViewOnceClicked = { viewOnceMsg -> showViewOnceModal(viewOnceMsg) },
             onImageClicked = { imgMsg -> openPhotoViewer(imgMsg) },
             onDocumentClicked = { docMsg -> openDocumentFile(docMsg) },
-            onVideoClicked = { videoMsg -> launchVideoPlayer(videoMsg) }
+            onVideoClicked = { videoMsg -> launchVideoPlayer(videoMsg) },
+            onMessageLongClicked = { msg, _ -> showReactionsAndContextMenu(msg) }
         )
         binding.rvChatMessages.adapter = adapter
 
@@ -289,13 +333,16 @@ class ChatActivity : AppCompatActivity() {
             val text = binding.etMessage.text.toString().trim()
             if (text.isNotEmpty()) {
                 stopTyping()
+                val replyId = activeQuotedMessage?.id
+                clearActiveReply()
                 sendMessage(
                     text = text,
                     attachmentType = "NONE",
                     attachmentUrl = null,
                     thumbnailBlur = null,
                     fileSizeBytes = 0,
-                    isViewOnce = false
+                    isViewOnce = false,
+                    replyToId = replyId
                 )
                 binding.etMessage.setText("")
             }
@@ -360,6 +407,11 @@ class ChatActivity : AppCompatActivity() {
         })
     }
 
+    private fun setupMessageDispatcher() {
+        MessageDispatchManager.initialize(authToken, serverUrl)
+        MessageDispatchManager.addListener(this)
+    }
+
     private fun triggerHapticFeedback() {
         try {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
@@ -375,7 +427,241 @@ class ChatActivity : AppCompatActivity() {
     }
 
     // ==========================================
-    // 1. HOLD-TO-RECORD VOICE NOTE IMPLEMENTATION
+    // REPLIES & PINNED BANNER HELPERS
+    // ==========================================
+    private fun setReplyMessage(msg: ChatMessage) {
+        activeQuotedMessage = msg
+        binding.layoutReplyPreview.visibility = View.VISIBLE
+        val authorName = if (msg.senderId == currentUserId) "You" else (targetDisplayName.ifEmpty { "@$targetUsername" })
+        binding.tvReplyAuthor.text = "Replying to $authorName"
+        binding.tvReplySnippet.text = when {
+            msg.attachmentType == "IMAGE" -> "📷 Photo"
+            msg.attachmentType == "VIDEO" -> "🎥 Video"
+            msg.attachmentType == "AUDIO" -> "🎤 Voice Note"
+            msg.attachmentType == "DOCUMENT" -> "📄 Document"
+            msg.attachmentType == "LOCATION" -> "📍 Location"
+            else -> msg.messageText ?: "Quoted message"
+        }
+        binding.etMessage.requestFocus()
+    }
+
+    private fun clearActiveReply() {
+        activeQuotedMessage = null
+        binding.layoutReplyPreview.visibility = View.GONE
+    }
+
+    private fun updatePinnedBannerUI() {
+        val pinnedMsg = cachedMessageList.find { it.isPinned }
+        if (pinnedMsg != null) {
+            binding.layoutPinnedBanner.visibility = View.VISIBLE
+            binding.tvPinnedSnippet.text = when {
+                pinnedMsg.attachmentType == "IMAGE" -> "📷 Photo"
+                pinnedMsg.attachmentType == "VIDEO" -> "🎥 Video"
+                pinnedMsg.attachmentType == "AUDIO" -> "🎤 Voice Note"
+                pinnedMsg.attachmentType == "DOCUMENT" -> "📄 Document"
+                pinnedMsg.attachmentType == "LOCATION" -> "📍 Location"
+                else -> pinnedMsg.messageText ?: "Pinned message"
+            }
+        } else {
+            binding.layoutPinnedBanner.visibility = View.GONE
+        }
+    }
+
+    // ==========================================
+    // LONG PRESS REACTION & CONTEXT MENU (TASK 3)
+    // ==========================================
+    private fun showReactionsAndContextMenu(msg: ChatMessage) {
+        triggerHapticFeedback()
+
+        val bottomSheet = BottomSheetDialog(this)
+        val menuBinding = DialogMessageContextMenuBinding.inflate(layoutInflater)
+        bottomSheet.setContentView(menuBinding.root)
+
+        // Setup reactions
+        val emojis = mapOf(
+            menuBinding.btnReactionHeart to "❤️",
+            menuBinding.btnReactionThumbsUp to "👍",
+            menuBinding.btnReactionThumbsDown to "👎",
+            menuBinding.btnReactionFire to "🔥",
+            menuBinding.btnReactionInLove to "🥰",
+            menuBinding.btnReactionClap to "👏",
+            menuBinding.btnReactionJoy to "😂"
+        )
+
+        emojis.forEach { (view, emoji) ->
+            view.setOnClickListener {
+                triggerHapticFeedback()
+                MessageDispatchManager.emitReaction(msg.id, emoji)
+                bottomSheet.dismiss()
+            }
+        }
+
+        // 1. Reply / Quote
+        menuBinding.btnActionReply.setOnClickListener {
+            bottomSheet.dismiss()
+            setReplyMessage(msg)
+        }
+
+        // 2. Copy Text
+        if (!msg.messageText.isNullOrEmpty() && msg.attachmentType == "NONE") {
+            menuBinding.btnActionCopy.visibility = View.VISIBLE
+            menuBinding.btnActionCopy.setOnClickListener {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("Horizon Message", msg.messageText)
+                clipboard.setPrimaryClip(clip)
+                Toast.makeText(this, "Message copied to clipboard", Toast.LENGTH_SHORT).show()
+                bottomSheet.dismiss()
+            }
+        } else {
+            menuBinding.btnActionCopy.visibility = View.GONE
+        }
+
+        // 3. Pin / Unpin
+        menuBinding.tvPinActionLabel.text = if (msg.isPinned) "Unpin Message" else "Pin Message"
+        menuBinding.btnActionPin.setOnClickListener {
+            MessageDispatchManager.emitPin(msg.id, !msg.isPinned)
+            bottomSheet.dismiss()
+        }
+
+        // 4. Forward
+        menuBinding.btnActionForward.setOnClickListener {
+            bottomSheet.dismiss()
+            showForwardDialog(msg)
+        }
+
+        // 5. Save to Downloads
+        if (msg.attachmentType in listOf("IMAGE", "VIDEO", "DOCUMENT", "AUDIO") && !msg.attachmentUrl.isNullOrEmpty()) {
+            menuBinding.btnActionSave.visibility = View.VISIBLE
+            menuBinding.btnActionSave.setOnClickListener {
+                bottomSheet.dismiss()
+                saveMediaToDownloads(msg)
+            }
+        } else {
+            menuBinding.btnActionSave.visibility = View.GONE
+        }
+
+        // 6. Delete
+        menuBinding.btnActionDelete.setOnClickListener {
+            bottomSheet.dismiss()
+            showDeleteDialog(msg)
+        }
+
+        bottomSheet.show()
+    }
+
+    private fun showDeleteDialog(msg: ChatMessage) {
+        val isMe = msg.senderId == currentUserId
+        val options = if (isMe) {
+            arrayOf("Delete for me", "Delete for everyone")
+        } else {
+            arrayOf("Delete for me")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Delete message?")
+            .setItems(options) { _, which ->
+                if (which == 0) {
+                    MessageDispatchManager.emitDelete(msg.id, deleteForEveryone = false)
+                } else {
+                    MessageDispatchManager.emitDelete(msg.id, deleteForEveryone = true)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showForwardDialog(msg: ChatMessage) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val res = ApiClient.apiService.getConversations("Bearer $authToken")
+                if (res.isSuccessful && res.body() != null) {
+                    val convs = res.body()!!
+                    withContext(Dispatchers.Main) {
+                        val names = convs.map { it.partnerDisplayName ?: it.partnerUsername }.toTypedArray()
+                        if (names.isEmpty()) {
+                            Toast.makeText(this@ChatActivity, "No other chats to forward to", Toast.LENGTH_SHORT).show()
+                            return@withContext
+                        }
+
+                        AlertDialog.Builder(this@ChatActivity)
+                            .setTitle("Forward message to...")
+                            .setItems(names) { _, which ->
+                                val target = convs[which]
+                                MessageDispatchManager.enqueueMessage(
+                                    currentUserId = currentUserId,
+                                    recipientId = target.partnerUserId,
+                                    text = msg.messageText ?: "",
+                                    attachmentType = msg.attachmentType,
+                                    attachmentUrl = msg.attachmentUrl,
+                                    thumbnailBlur = msg.thumbnailBlur,
+                                    fileSizeBytes = msg.fileSizeBytes,
+                                    isViewOnce = false,
+                                    replyToId = null
+                                )
+                                Toast.makeText(this@ChatActivity, "Forwarded to ${names[which]}", Toast.LENGTH_SHORT).show()
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun saveMediaToDownloads(msg: ChatMessage) {
+        val url = msg.attachmentUrl ?: return
+        val ext = when (msg.attachmentType) {
+            "IMAGE" -> "jpg"
+            "VIDEO" -> "mp4"
+            "AUDIO" -> "m4a"
+            "DOCUMENT" -> "pdf"
+            else -> "bin"
+        }
+        val fileName = if (!msg.messageText.isNullOrEmpty() && msg.attachmentType == "DOCUMENT") {
+            msg.messageText!!
+        } else {
+            "Horizon_${msg.attachmentType.lowercase()}_${System.currentTimeMillis()}.$ext"
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val targetFile = File(downloadsDir, fileName)
+
+                if (url.startsWith("data:")) {
+                    val cleanBase64 = if (url.contains("base64,")) url.substringAfter("base64,") else url
+                    val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+                    FileOutputStream(targetFile).use { it.write(bytes) }
+                } else if (url.startsWith("http")) {
+                    val client = OkHttpClient()
+                    val req = Request.Builder().url(url).build()
+                    val resp = client.newCall(req).execute()
+                    if (resp.isSuccessful && resp.body != null) {
+                        FileOutputStream(targetFile).use { it.write(resp.body!!.bytes()) }
+                    }
+                } else {
+                    val src = File(url)
+                    if (src.exists()) {
+                        src.copyTo(targetFile, overwrite = true)
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Saved to Downloads: $fileName", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@ChatActivity, "Failed to save: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // VOICE NOTE IMPLEMENTATION
     // ==========================================
     private fun startVoiceRecording() {
         try {
@@ -398,7 +684,6 @@ class ChatActivity : AppCompatActivity() {
             binding.layoutRecordingBar.visibility = View.VISIBLE
             binding.tvRecordingTimer.text = "0:00"
 
-            // Pulse red dot animation
             binding.ivRecordingDot.animate().alpha(0.2f).setDuration(400).withEndAction {
                 binding.ivRecordingDot.animate().alpha(1.0f).setDuration(400).start()
             }.start()
@@ -439,7 +724,6 @@ class ChatActivity : AppCompatActivity() {
             return
         }
 
-        // Decouple recording from immediate dispatch: Swap input bar to Preview & Staging Bar
         recordedAudioDurationMs = elapsedMs
         val totalSec = (elapsedMs / 1000).toInt()
         val durationFormatted = String.format("%d:%02d", totalSec / 60, totalSec % 60)
@@ -481,7 +765,6 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
-        // Cancel / Trash button
         binding.btnCancelVoice.setOnClickListener {
             cleanVoicePreviewState()
             file.delete()
@@ -490,11 +773,12 @@ class ChatActivity : AppCompatActivity() {
             Toast.makeText(this, "Voice note discarded", Toast.LENGTH_SHORT).show()
         }
 
-        // Dedicated Send button
         binding.btnSendVoice.setOnClickListener {
             cleanVoicePreviewState()
             restoreNormalInputDock()
-            uploadAndSendVoiceNote(file, durationMs)
+            val replyId = activeQuotedMessage?.id
+            clearActiveReply()
+            uploadAndSendVoiceNote(file, durationMs, replyId)
         }
     }
 
@@ -530,7 +814,7 @@ class ChatActivity : AppCompatActivity() {
         binding.layoutNormalInput.visibility = View.VISIBLE
     }
 
-    private fun uploadAndSendVoiceNote(file: File, durationMs: Long) {
+    private fun uploadAndSendVoiceNote(file: File, durationMs: Long, replyId: Long?) {
         val totalSec = (durationMs / 1000).toInt()
         val durationText = String.format("%d:%02d", totalSec / 60, totalSec % 60)
 
@@ -569,7 +853,8 @@ class ChatActivity : AppCompatActivity() {
                         thumbnailBlur = null,
                         fileSizeBytes = bytes.size.toLong(),
                         isViewOnce = viewOnce,
-                        preassignedTempId = tempId
+                        preassignedTempId = tempId,
+                        replyToId = replyId
                     )
                 }
             } catch (e: Exception) {
@@ -584,115 +869,13 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    // ====================================================
-    // 2. FULL-SCREEN LIGHTBOX VIEWER (IMAGES & AVATARS)
-    // ====================================================
-    private fun openLightboxViewer(imageUrl: String, titleText: String) {
-        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val frameLayout = FrameLayout(this).apply {
-            setBackgroundColor(ContextCompat.getColor(context, R.color.bg_base))
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
-
-        // Pinch-to-zoom interactive ImageView
-        val imageView = ImageView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            scaleType = ImageView.ScaleType.FIT_CENTER
-        }
-
-        val matrix = Matrix()
-        var scaleFactor = 1f
-        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                scaleFactor *= detector.scaleFactor
-                scaleFactor = Math.max(0.75f, Math.min(scaleFactor, 5.0f))
-                matrix.setScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
-                imageView.imageMatrix = matrix
-                return true
-            }
-        })
-
-        imageView.setOnTouchListener { _, event ->
-            if (imageView.scaleType != ImageView.ScaleType.MATRIX) {
-                imageView.scaleType = ImageView.ScaleType.MATRIX
-            }
-            scaleDetector.onTouchEvent(event)
-            true
-        }
-        frameLayout.addView(imageView)
-
-        // Top bar container
-        val topBar = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = 40
-                leftMargin = 20
-                rightMargin = 20
-            }
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = titleText
-            setTextColor(ContextCompat.getColor(context, R.color.accent_amber))
-            textSize = 15f
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }
-        }
-        topBar.addView(tvTitle)
-
-        val btnClose = TextView(this).apply {
-            text = "✕ CLOSE"
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            textSize = 14f
-            setPadding(20, 14, 20, 14)
-            setBackgroundColor(ContextCompat.getColor(context, R.color.surface_elevated))
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
-            setOnClickListener { dialog.dismiss() }
-        }
-        topBar.addView(btnClose)
-        frameLayout.addView(topBar)
-
-        dialog.setContentView(frameLayout)
-
-        if (imageUrl.startsWith("data:image/")) {
-            try {
-                val cleanBase64 = imageUrl.substringAfter("base64,")
-                val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
-                val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-                imageView.setImageBitmap(bitmap)
-            } catch (e: Exception) {
-                Glide.with(this).load(imageUrl).into(imageView)
-            }
-        } else {
-            Glide.with(this).load(imageUrl).into(imageView)
-        }
-
-        dialog.show()
-    }
-
-
-
     private fun renderToolbarAvatar() {
-        if (!targetAvatarUrl.isNullOrEmpty()) {
-            Glide.with(this)
-                .load(targetAvatarUrl)
-                .circleCrop()
-                .placeholder(android.R.drawable.sym_def_app_icon)
-                .into(binding.ivRecipientAvatar)
-        }
+        AvatarHelper.setupAvatar(
+            imageView = binding.ivRecipientAvatar,
+            initialsView = binding.tvRecipientAvatarInitials,
+            avatarUrl = targetAvatarUrl,
+            name = if (targetDisplayName.isNotEmpty()) targetDisplayName else targetUsername
+        )
         updatePresenceUI(isTargetOnline, false)
     }
 
@@ -706,33 +889,9 @@ class ChatActivity : AppCompatActivity() {
             binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.ticks_sent))
             binding.viewOnlineDot.visibility = View.VISIBLE
         } else {
-            binding.tvPresence.text = formatLastSeen(targetLastSeen)
+            binding.tvPresence.text = TimeFormatHelper.formatLastSeen(targetLastSeen, isOnline)
             binding.tvPresence.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
             binding.viewOnlineDot.visibility = View.GONE
-        }
-    }
-
-    private fun formatLastSeen(iso: String?): String {
-        if (iso.isNullOrEmpty()) return "offline"
-        return try {
-            val utcFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            val date = try {
-                utcFormat.parse(iso)
-            } catch (e: Exception) {
-                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.parse(iso)
-            }
-            if (date != null) {
-                val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
-                "last seen " + timeFormat.format(date)
-            } else {
-                "offline"
-            }
-        } catch (e: Exception) {
-            "offline"
         }
     }
 
@@ -759,12 +918,12 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    // ====================================================
-    // 3. NATIVE ANDROID CAMERA INTEGRATION (PHOTO & VIDEO)
-    // ====================================================
+    // ==========================================
+    // CAMERA & MEDIA PICKERS
+    // ==========================================
     private fun openCameraChoiceDialog() {
         val options = arrayOf("📸 Take Photo", "🎥 Record Video")
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("Camera")
             .setItems(options) { _, which ->
                 when (which) {
@@ -790,6 +949,9 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun handleCapturedVideo(uri: Uri) {
+        val replyId = activeQuotedMessage?.id
+        clearActiveReply()
+
         lifecycleScope.launch(Dispatchers.IO) {
             var currentTempId = System.currentTimeMillis()
             try {
@@ -846,32 +1008,6 @@ class ChatActivity : AppCompatActivity() {
                 val metaThumb = (thumbBase64 ?: "") + ";dur:" + durationText
                 val viewOnce = isViewOnceActive
 
-                // 1. INSTANT OPTIMISTIC VIDEO BUBBLE INSERTION (UPLOADING INDICATOR)
-                val optimisticMsg = ChatMessage(
-                    id = currentTempId,
-                    senderId = currentUserId,
-                    recipientId = targetUserId,
-                    messageText = durationText,
-                    attachmentType = "VIDEO",
-                    attachmentUrl = localCopy.absolutePath,
-                    thumbnailBlur = metaThumb,
-                    fileSizeBytes = bytes.size.toLong(),
-                    status = "UPLOADING",
-                    isViewOnce = viewOnce,
-                    isViewed = false,
-                    createdAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                        timeZone = TimeZone.getTimeZone("UTC")
-                    }.format(Date())
-                )
-
-                withContext(Dispatchers.Main) {
-                    isViewOnceActive = false
-                    updateViewOnceToggleUI()
-                    adapter.appendMessage(optimisticMsg)
-                    binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
-                }
-
-                // 2. BACKGROUND UPLOAD TO SERVER
                 val base64 = "data:video/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val uploadReq = MediaUploadRequest(
                     imageBase64 = base64,
@@ -886,73 +1022,49 @@ class ChatActivity : AppCompatActivity() {
                     base64
                 }
 
-                // 3. DISPATCH WEBSOCKET MESSAGE & TRANSITION STATUS TO SENT
-                val payload = JSONObject().apply {
-                    put("recipientId", targetUserId)
-                    put("text", durationText)
-                    put("attachmentType", "VIDEO")
-                    put("attachmentUrl", finalUrl)
-                    put("thumbnailBlur", metaThumb)
-                    put("fileSizeBytes", bytes.size.toLong())
-                    put("isViewOnce", viewOnce)
+                withContext(Dispatchers.Main) {
+                    isViewOnceActive = false
+                    updateViewOnceToggleUI()
+                    sendMessage(
+                        text = durationText,
+                        attachmentType = "VIDEO",
+                        attachmentUrl = finalUrl,
+                        thumbnailBlur = metaThumb,
+                        fileSizeBytes = bytes.size.toLong(),
+                        isViewOnce = viewOnce,
+                        preassignedTempId = currentTempId,
+                        replyToId = replyId
+                    )
                 }
-
-                mSocket?.emit("send_message", payload, io.socket.client.Ack { ackArgs ->
-                    if (ackArgs.isNotEmpty()) {
-                        val ackObj = ackArgs[0] as? JSONObject
-                        val savedObj = ackObj?.optJSONObject("message")
-                        if (savedObj != null) {
-                            val serverMsg = parseJsonMessage(savedObj)
-                            runOnUiThread {
-                                adapter.updateOptimisticMessage(currentTempId, serverMsg)
-                                try {
-                                    val finalFile = File(videoDir, "vid_${serverMsg.id}.mp4")
-                                    if (localCopy.exists()) {
-                                        localCopy.copyTo(finalFile, overwrite = true)
-                                    }
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                }
-                            }
-                        }
-                    }
-                })
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    adapter.updateMessageStatus(currentTempId, "FAILED")
                     Toast.makeText(this@ChatActivity, "Failed to upload video: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    // ====================================================
-    // 4. ATTACHMENT BOTTOM SHEET & PICKERS
-    // ====================================================
     private fun showAttachmentBottomSheet() {
         val bottomSheet = BottomSheetDialog(this)
         val sheetBinding = DialogAttachmentPickerBinding.inflate(layoutInflater)
         bottomSheet.setContentView(sheetBinding.root)
 
-        // Sync View-Once switch
         sheetBinding.switchViewOnce.isChecked = isViewOnceActive
         sheetBinding.switchViewOnce.setOnCheckedChangeListener { _, isChecked ->
             isViewOnceActive = isChecked
             updateViewOnceToggleUI()
         }
 
-        // 1. Photo Gallery
         sheetBinding.btnOptionGallery.setOnClickListener {
             bottomSheet.dismiss()
             imagePickerLauncher.launch("image/*")
         }
 
-        // 2. Video Gallery / Picker
         sheetBinding.btnOptionVideo.setOnClickListener {
             bottomSheet.dismiss()
             val choices = arrayOf("📁 Choose Video from Gallery", "🎥 Record Video with Camera")
-            androidx.appcompat.app.AlertDialog.Builder(this)
+            AlertDialog.Builder(this)
                 .setTitle("Send Video")
                 .setItems(choices) { _, which ->
                     when (which) {
@@ -969,13 +1081,11 @@ class ChatActivity : AppCompatActivity() {
                 .show()
         }
 
-        // 3. Document
         sheetBinding.btnOptionDocument.setOnClickListener {
             bottomSheet.dismiss()
             documentPickerLauncher.launch("*/*")
         }
 
-        // 4. Camera (Photo or Video)
         sheetBinding.btnOptionCamera.setOnClickListener {
             bottomSheet.dismiss()
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -985,13 +1095,11 @@ class ChatActivity : AppCompatActivity() {
             }
         }
 
-        // 5. Voice Note Guidance
         sheetBinding.btnOptionVoice.setOnClickListener {
             bottomSheet.dismiss()
             Toast.makeText(this, "Hold the mic icon on the bottom right to record voice notes", Toast.LENGTH_LONG).show()
         }
 
-        // 6. Location
         sheetBinding.btnOptionLocation.setOnClickListener {
             bottomSheet.dismiss()
             sendLocation()
@@ -1001,6 +1109,9 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun handlePickedImage(uri: Uri) {
+        val replyId = activeQuotedMessage?.id
+        clearActiveReply()
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val inputStream = contentResolver.openInputStream(uri)
@@ -1060,7 +1171,8 @@ class ChatActivity : AppCompatActivity() {
                             attachmentUrl = finalUrl,
                             thumbnailBlur = thumbBase64,
                             fileSizeBytes = fullSize,
-                            isViewOnce = viewOnce
+                            isViewOnce = viewOnce,
+                            replyToId = replyId
                         )
                     }
                 }
@@ -1074,6 +1186,9 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun handlePickedDocument(uri: Uri) {
+        val replyId = activeQuotedMessage?.id
+        clearActiveReply()
+
         var docName = "Document.pdf"
         var docSize = 0L
 
@@ -1106,7 +1221,6 @@ class ChatActivity : AppCompatActivity() {
                     thumbnailBlur = null
                 )
 
-                // Cache local copy for instant viewing
                 try {
                     val docsDir = File(cacheDir, "documents").apply { mkdirs() }
                     File(docsDir, docName).writeBytes(bytes)
@@ -1128,7 +1242,8 @@ class ChatActivity : AppCompatActivity() {
                         attachmentUrl = finalUrl,
                         thumbnailBlur = null,
                         fileSizeBytes = docSize,
-                        isViewOnce = false
+                        isViewOnce = false,
+                        replyToId = replyId
                     )
                 }
             } catch (e: Exception) {
@@ -1150,6 +1265,9 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun fetchAndSendRealLocation() {
+        val replyId = activeQuotedMessage?.id
+        clearActiveReply()
+
         try {
             val locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             val location: Location? = try {
@@ -1171,7 +1289,8 @@ class ChatActivity : AppCompatActivity() {
                 attachmentUrl = mapUrl,
                 thumbnailBlur = null,
                 fileSizeBytes = 0,
-                isViewOnce = false
+                isViewOnce = false,
+                replyToId = replyId
             )
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1181,7 +1300,8 @@ class ChatActivity : AppCompatActivity() {
                 attachmentUrl = "https://maps.google.com/?q=30.7333,76.7794",
                 thumbnailBlur = null,
                 fileSizeBytes = 0,
-                isViewOnce = false
+                isViewOnce = false,
+                replyToId = replyId
             )
         }
     }
@@ -1288,150 +1408,17 @@ class ChatActivity : AppCompatActivity() {
                     e.printStackTrace()
                 }
             }
-            val payload = JSONObject().apply {
-                put("messageId", msg.id)
-                put("recipientId", targetUserId)
-            }
-            mSocket?.emit("mark_media_viewed", payload)
+            MessageDispatchManager.emitMediaViewed(msg.id, targetUserId)
             Toast.makeText(this, "Photo closed and permanently expired.", Toast.LENGTH_SHORT).show()
         }
 
         dialog.show()
     }
 
-    // ==========================================
-    // 5. WEBSOCKET GATEWAY & REAL-TIME RECEIPTS
-    // ==========================================
-    private fun setupSocket() {
-        try {
-            val options = IO.Options().apply {
-                auth = mapOf("token" to authToken)
-                reconnection = true
-                reconnectionAttempts = 5
-                reconnectionDelay = 1000
-            }
-            mSocket = IO.socket(serverUrl, options)
-
-            mSocket?.on("new_message") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    data?.let {
-                        val msg = parseJsonMessage(it)
-                        runOnUiThread {
-                            if (msg.senderId == targetUserId || msg.recipientId == targetUserId) {
-                                adapter.appendMessage(msg)
-                                binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
-                                if (msg.senderId == targetUserId) {
-                                    markMessageDelivered(msg.id)
-                                    markMessageRead(msg.id)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Real-Time Delivery Receipt Acknowledgement
-            mSocket?.on("message_delivered_ack") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val messageId = data?.optLong("messageId") ?: -1L
-                    if (messageId != -1L) {
-                        runOnUiThread {
-                            adapter.markMessageDelivered(messageId)
-                        }
-                    }
-                }
-            }
-
-            // Real-Time Read Receipt Acknowledgement
-            mSocket?.on("message_read_ack") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val messageId = data?.optLong("messageId") ?: -1L
-                    if (messageId != -1L) {
-                        runOnUiThread {
-                            adapter.markMessageRead(messageId)
-                        }
-                    }
-                }
-            }
-
-            // Scoped Real-Time Typing Indicators
-            mSocket?.on("user_typing") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val senderId = data?.optInt("userId", data?.optInt("senderId", -1) ?: -1) ?: -1
-                    val isTyping = data?.optBoolean("isTyping", false) ?: false
-                    if (senderId == targetUserId) {
-                        runOnUiThread {
-                            updatePresenceUI(isTargetOnline, isTyping)
-                        }
-                    }
-                }
-            }
-
-            mSocket?.on("media_viewed") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val messageId = data?.optLong("messageId", -1L) ?: -1L
-                    if (messageId != -1L) {
-                        runOnUiThread {
-                            adapter.markMessageViewed(messageId)
-                        }
-                    }
-                }
-            }
-
-            mSocket?.on("user_status_changed") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val uId = data?.optInt("userId")
-                    val status = data?.optString("status")
-                    val lastSeen = data?.optString("lastSeen")
-                    if (uId == targetUserId) {
-                        isTargetOnline = status == "online"
-                        if (!lastSeen.isNullOrEmpty()) {
-                            targetLastSeen = lastSeen
-                        }
-                        runOnUiThread {
-                            updatePresenceUI(isTargetOnline, false)
-                        }
-                    }
-                }
-            }
-
-            mSocket?.on("user_status_change") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val uId = data?.optInt("userId")
-                    val status = data?.optString("status")
-                    val lastSeen = data?.optString("lastSeen")
-                    if (uId == targetUserId) {
-                        isTargetOnline = status == "online"
-                        if (!lastSeen.isNullOrEmpty()) {
-                            targetLastSeen = lastSeen
-                        }
-                        runOnUiThread {
-                            updatePresenceUI(isTargetOnline, false)
-                        }
-                    }
-                }
-            }
-
-            mSocket?.connect()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
     private fun startTyping() {
         if (!isCurrentlyTyping) {
             isCurrentlyTyping = true
-            val payload = JSONObject().apply {
-                put("recipientId", targetUserId)
-            }
-            mSocket?.emit("typing_start", payload)
+            MessageDispatchManager.emitTypingStart(targetUserId)
         }
         typingHandler.removeCallbacks(stopTypingRunnable)
         typingHandler.postDelayed(stopTypingRunnable, 2500)
@@ -1441,10 +1428,7 @@ class ChatActivity : AppCompatActivity() {
         if (isCurrentlyTyping) {
             isCurrentlyTyping = false
             typingHandler.removeCallbacks(stopTypingRunnable)
-            val payload = JSONObject().apply {
-                put("recipientId", targetUserId)
-            }
-            mSocket?.emit("typing_stop", payload)
+            MessageDispatchManager.emitTypingStop(targetUserId)
         }
     }
 
@@ -1460,15 +1444,12 @@ class ChatActivity : AppCompatActivity() {
                 if (response.isSuccessful && response.body() != null) {
                     val list = response.body()!!
                     withContext(Dispatchers.Main) {
+                        cachedMessageList.clear()
+                        cachedMessageList.addAll(list)
                         adapter.setMessages(list)
                         binding.rvChatMessages.scrollToPosition(adapter.itemCount - 1)
-                        // Acknowledge delivery & read for all unread incoming messages
-                        list.forEach { msg ->
-                            if (msg.senderId == targetUserId && msg.status != "READ") {
-                                markMessageDelivered(msg.id)
-                                markMessageRead(msg.id)
-                            }
-                        }
+                        updatePinnedBannerUI()
+                        MessageDispatchManager.emitBatchRead(targetUserId)
                     }
                 }
             } catch (e: Exception) {
@@ -1491,7 +1472,9 @@ class ChatActivity : AppCompatActivity() {
                 if (response.isSuccessful && response.body() != null) {
                     val olderBatch = response.body()!!
                     withContext(Dispatchers.Main) {
+                        cachedMessageList.addAll(0, olderBatch)
                         adapter.prependMessages(olderBatch)
+                        updatePinnedBannerUI()
                         isLoadingOlder = false
                     }
                 } else {
@@ -1514,95 +1497,144 @@ class ChatActivity : AppCompatActivity() {
         thumbnailBlur: String?,
         fileSizeBytes: Long,
         isViewOnce: Boolean,
-        preassignedTempId: Long? = null
+        preassignedTempId: Long? = null,
+        replyToId: Long? = null
     ) {
-        val tempId = preassignedTempId ?: System.currentTimeMillis()
-        val optimisticMsg = ChatMessage(
-            id = tempId,
-            senderId = currentUserId,
+        val optimisticMsg = MessageDispatchManager.enqueueMessage(
+            currentUserId = currentUserId,
             recipientId = targetUserId,
-            messageText = text,
+            text = text,
             attachmentType = attachmentType,
             attachmentUrl = attachmentUrl,
             thumbnailBlur = thumbnailBlur,
             fileSizeBytes = fileSizeBytes,
-            status = "SENT",
             isViewOnce = isViewOnce,
-            isViewed = false,
-            createdAt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }.format(Date())
+            replyToId = replyToId
         )
+        cachedMessageList.add(optimisticMsg)
         adapter.appendMessage(optimisticMsg)
         binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
+    }
 
-        val payload = JSONObject().apply {
-            put("recipientId", targetUserId)
-            put("text", text)
-            put("attachmentType", attachmentType)
-            if (attachmentUrl != null) put("attachmentUrl", attachmentUrl)
-            if (thumbnailBlur != null) put("thumbnailBlur", thumbnailBlur)
-            if (fileSizeBytes > 0) put("fileSizeBytes", fileSizeBytes)
-            put("isViewOnce", isViewOnce)
+    // ==========================================
+    // MESSAGE DISPATCH MANAGER LISTENER CALLBACKS
+    // ==========================================
+    override fun onNewMessage(message: ChatMessage) {
+        runOnUiThread {
+            if (message.senderId == targetUserId || message.recipientId == targetUserId) {
+                val existingIdx = cachedMessageList.indexOfFirst { it.id == message.id || (it.localClientId != null && it.localClientId == message.localClientId) }
+                if (existingIdx != -1) {
+                    cachedMessageList[existingIdx] = message
+                    adapter.updateOptimisticMessage(cachedMessageList[existingIdx].id, message)
+                } else {
+                    cachedMessageList.add(message)
+                    adapter.appendMessage(message)
+                    binding.rvChatMessages.smoothScrollToPosition(adapter.itemCount - 1)
+                }
+                if (message.senderId == targetUserId) {
+                    MessageDispatchManager.emitBatchRead(targetUserId)
+                }
+                updatePinnedBannerUI()
+            }
         }
+    }
 
-        mSocket?.emit("send_message", payload, io.socket.client.Ack { ackArgs ->
-            if (ackArgs.isNotEmpty()) {
-                val ackObj = ackArgs[0] as? JSONObject
-                val savedObj = ackObj?.optJSONObject("message")
-                if (savedObj != null) {
-                    val serverMsg = parseJsonMessage(savedObj)
-                    runOnUiThread {
-                        adapter.updateOptimisticMessage(tempId, serverMsg)
-                        if (serverMsg.attachmentType == "AUDIO") {
-                            try {
-                                val voiceDir = File(cacheDir, "voice_cache")
-                                val tempFile = File(voiceDir, "voice_${tempId}.m4a")
-                                val finalFile = File(voiceDir, "voice_${serverMsg.id}.m4a")
-                                if (tempFile.exists()) {
-                                    tempFile.copyTo(finalFile, overwrite = true)
-                                }
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
+    override fun onMessageStatusUpdated(messageId: Long, localClientId: String?, status: String) {
+        runOnUiThread {
+            val idx = cachedMessageList.indexOfFirst { it.id == messageId || (localClientId != null && it.localClientId == localClientId) }
+            if (idx != -1) {
+                cachedMessageList[idx].status = status
+            }
+            if (status == "READ") {
+                adapter.markMessageRead(messageId)
+            } else if (status == "DELIVERED") {
+                adapter.markMessageDelivered(messageId)
+            } else {
+                adapter.updateMessageStatus(messageId, status)
+            }
+        }
+    }
+
+    override fun onMessageReactionUpdated(messageId: Long, reactions: Map<String, List<Int>>) {
+        runOnUiThread {
+            val idx = cachedMessageList.indexOfFirst { it.id == messageId }
+            if (idx != -1) {
+                cachedMessageList[idx].reactions = reactions
+            }
+            adapter.updateMessageReaction(messageId, reactions)
+        }
+    }
+
+    override fun onMessagePinned(messageId: Long, isPinned: Boolean) {
+        runOnUiThread {
+            val idx = cachedMessageList.indexOfFirst { it.id == messageId }
+            if (idx != -1) {
+                cachedMessageList[idx].isPinned = isPinned
+            }
+            adapter.updateMessagePinned(messageId, isPinned)
+            updatePinnedBannerUI()
+        }
+    }
+
+    override fun onMessageDeleted(messageId: Long, deletedForEveryone: Boolean, deletedByUsers: List<Int>) {
+        runOnUiThread {
+            val idx = cachedMessageList.indexOfFirst { it.id == messageId }
+            if (idx != -1) {
+                if (deletedForEveryone) {
+                    cachedMessageList[idx].deletedForEveryone = true
+                    cachedMessageList[idx].messageText = "🚫 This message was deleted"
+                    cachedMessageList[idx].attachmentType = "NONE"
+                    cachedMessageList[idx].attachmentUrl = null
+                } else if (deletedByUsers.contains(currentUserId)) {
+                    cachedMessageList.removeAt(idx)
+                }
+            }
+            adapter.updateMessageDeleted(messageId, deletedForEveryone, "🚫 This message was deleted")
+            updatePinnedBannerUI()
+        }
+    }
+
+    override fun onUserTyping(userId: Int, isTyping: Boolean) {
+        runOnUiThread {
+            if (userId == targetUserId) {
+                updatePresenceUI(isTargetOnline, isTyping)
+            }
+        }
+    }
+
+    override fun onUserStatusChanged(userId: Int, status: String, lastSeen: String?) {
+        runOnUiThread {
+            if (userId == targetUserId) {
+                isTargetOnline = status == "online"
+                if (!lastSeen.isNullOrEmpty()) {
+                    targetLastSeen = lastSeen
+                }
+                updatePresenceUI(isTargetOnline, false)
+            }
+        }
+    }
+
+    override fun onConversationRead(readerId: Int, partnerId: Int, readAt: String) {
+        runOnUiThread {
+            if (readerId == targetUserId && partnerId == currentUserId) {
+                cachedMessageList.forEach { msg ->
+                    if (msg.senderId == currentUserId) {
+                        msg.status = "READ"
+                        adapter.markMessageRead(msg.id)
                     }
                 }
             }
-        })
-    }
-
-    private fun markMessageDelivered(messageId: Long) {
-        val payload = JSONObject().apply {
-            put("messageId", messageId)
-            put("senderId", targetUserId)
         }
-        mSocket?.emit("mark_delivered", payload)
     }
 
-    private fun markMessageRead(messageId: Long) {
-        val payload = JSONObject().apply {
-            put("messageId", messageId)
-            put("senderId", targetUserId)
+    override fun onMediaViewed(messageId: Long) {
+        runOnUiThread {
+            val idx = cachedMessageList.indexOfFirst { it.id == messageId }
+            if (idx != -1) {
+                cachedMessageList[idx].isViewed = true
+            }
+            adapter.markMessageViewed(messageId)
         }
-        mSocket?.emit("mark_read", payload)
-    }
-
-    private fun parseJsonMessage(json: JSONObject): ChatMessage {
-        return ChatMessage(
-            id = json.optLong("id", System.currentTimeMillis()),
-            senderId = json.optInt("sender_id", 0),
-            recipientId = json.optInt("recipient_id", 0),
-            messageText = json.optString("message_text", ""),
-            attachmentType = json.optString("attachment_type", "NONE"),
-            attachmentUrl = json.optString("attachment_url", null),
-            thumbnailBlur = json.optString("thumbnail_blur", null),
-            fileSizeBytes = json.optLong("file_size_bytes", 0),
-            status = json.optString("status", "SENT"),
-            isViewOnce = json.optBoolean("is_view_once", false),
-            isViewed = json.optBoolean("is_viewed", false),
-            createdAt = json.optString("created_at", "")
-        )
     }
 
     private fun openPhotoViewer(msg: ChatMessage) {
@@ -1703,6 +1735,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        MessageDispatchManager.removeListener(this)
         stopTyping()
         cleanVoicePreviewState()
         try {
@@ -1712,7 +1745,6 @@ class ChatActivity : AppCompatActivity() {
         }
         mediaRecorder = null
         recordingTimerRunnable?.let { recordingTimerHandler.removeCallbacks(it) }
-        mSocket?.disconnect()
-        mSocket?.off()
+        adapter.releaseMediaPlayer()
     }
 }

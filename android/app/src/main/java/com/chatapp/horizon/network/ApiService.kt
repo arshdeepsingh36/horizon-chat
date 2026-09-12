@@ -89,6 +89,18 @@ interface ApiService {
         @Body request: BlockRequest
     ): Response<GenericResponse>
 
+    @GET("api/users/search")
+    suspend fun searchUsers(
+        @Header("Authorization") token: String,
+        @Query("q") query: String
+    ): Response<List<User>>
+
+    @POST("api/messages/batch-read")
+    suspend fun batchMarkRead(
+        @Header("Authorization") token: String,
+        @Body request: Map<String, Int>
+    ): Response<GenericResponse>
+
     @POST("api/users/report")
     suspend fun reportUser(
         @Header("Authorization") token: String,

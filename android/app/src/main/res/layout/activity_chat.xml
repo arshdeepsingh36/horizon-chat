@@ -54,7 +54,19 @@
                         android:id="@+id/ivRecipientAvatar"
                         android:layout_width="40dp"
                         android:layout_height="40dp"
-                        android:src="@android:drawable/sym_def_app_icon" />
+                        android:src="@android:drawable/sym_def_app_icon"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvRecipientAvatarInitials"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/circle_avatar_bg"
+                        android:gravity="center"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:text="U" />
 
                     <View
                         android:id="@+id/viewOnlineDot"
@@ -122,6 +134,63 @@
 
     </androidx.appcompat.widget.Toolbar>
 
+    <!-- Top Pinned Message Banner -->
+    <LinearLayout
+        android:id="@+id/layoutPinnedBanner"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#24334D"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/chatToolbar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:src="@drawable/ic_link"
+            app:tint="@color/accent_amber" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Pinned Message"
+                android:textColor="@color/accent_amber"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvPinnedSnippet"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Pinned snippet"
+                android:textColor="@color/text_primary"
+                android:textSize="13sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/btnClosePinned"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:src="@drawable/ic_clear_chat"
+            app:tint="@color/text_muted"
+            android:clickable="true"
+            android:focusable="true" />
+    </LinearLayout>
+
     <!-- In-Chat Message Search Bar -->
     <LinearLayout
         android:id="@+id/layoutInChatSearch"
@@ -132,7 +201,7 @@
         android:background="@color/surface_elevated"
         android:padding="8dp"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/chatToolbar"
+        app:layout_constraintTop_toBottomOf="@id/layoutPinnedBanner"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -181,14 +250,69 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- Bottom Dock Container -->
-    <FrameLayout
+    <LinearLayout
         android:id="@+id/dockContainer"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:orientation="vertical"
         android:background="@color/surface"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Quoted Reply Bar Above Input (Task 3.3) -->
+        <LinearLayout
+            android:id="@+id/layoutReplyPreview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#1E293B"
+            android:padding="8dp"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <View
+                android:layout_width="3dp"
+                android:layout_height="match_parent"
+                android:background="@color/accent_amber"
+                android:layout_marginEnd="8dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvReplyAuthor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Replying to User"
+                    android:textColor="@color/accent_amber"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvReplySnippet"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Message snippet"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/btnCancelReply"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_clear_chat"
+                app:tint="@color/text_muted"
+                android:padding="2dp"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
 
         <!-- 1. Normal Text & Media Input Bar -->
         <LinearLayout
@@ -383,6 +507,6 @@
 
         </LinearLayout>
 
-    </FrameLayout>
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

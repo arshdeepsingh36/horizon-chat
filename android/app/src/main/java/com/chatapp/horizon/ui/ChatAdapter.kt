@@ -23,6 +23,7 @@ import com.chatapp.horizon.databinding.ItemMessageReceivedBinding
 import com.chatapp.horizon.databinding.ItemMessageSentBinding
 import com.chatapp.horizon.models.ChatMessage
 import com.chatapp.horizon.network.ApiClient
+import com.chatapp.horizon.utils.TimeFormatHelper
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
@@ -41,7 +42,8 @@ class ChatAdapter(
     private val onViewOnceClicked: (ChatMessage) -> Unit = {},
     private val onImageClicked: (ChatMessage) -> Unit = {},
     private val onDocumentClicked: (ChatMessage) -> Unit = {},
-    private val onVideoClicked: (ChatMessage) -> Unit = {}
+    private val onVideoClicked: (ChatMessage) -> Unit = {},
+    private val onMessageLongClicked: (ChatMessage, View) -> Unit = { _, _ -> }
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -137,6 +139,43 @@ class ChatAdapter(
         }
     }
 
+    fun updateMessageReaction(messageId: Long, reactions: Map<String, List<Int>>) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index].reactions = reactions
+            notifyItemChanged(index)
+        }
+    }
+
+    fun updateMessageDeleted(messageId: Long, deletedForEveryone: Boolean, text: String?) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index].deletedForEveryone = deletedForEveryone
+            if (deletedForEveryone) {
+                messages[index].messageText = text ?: "🚫 This message was deleted"
+                messages[index].attachmentType = "NONE"
+                messages[index].attachmentUrl = null
+            } else {
+                messages.removeAt(index)
+                notifyItemRemoved(index)
+                return
+            }
+            notifyItemChanged(index)
+        }
+    }
+
+    fun updateMessagePinned(messageId: Long, isPinned: Boolean) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index].isPinned = isPinned
+            notifyItemChanged(index)
+        }
+    }
+
+    fun findMessageById(messageId: Long): ChatMessage? {
+        return messages.find { it.id == messageId }
+    }
+
     fun getOldestMessageId(): Long? {
         return messages.firstOrNull()?.id
     }
@@ -184,9 +223,15 @@ class ChatAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val msg = messages[position]
         val isSent = msg.senderId == currentUserId
+
+        holder.itemView.setOnLongClickListener {
+            onMessageLongClicked(msg, it)
+            true
+        }
+
         when (holder) {
-            is SentTextViewHolder -> holder.bind(msg)
-            is ReceivedTextViewHolder -> holder.bind(msg)
+            is SentTextViewHolder -> holder.bind(msg, ::findMessageById)
+            is ReceivedTextViewHolder -> holder.bind(msg, ::findMessageById)
             is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked, onImageClicked)
             is VideoViewHolder -> holder.bind(msg, isSent)
             is VoiceViewHolder -> holder.bind(msg, isSent, msg.id == activePlayingMsgId && activeMediaPlayer?.isPlaying == true)
@@ -384,18 +429,56 @@ class ChatAdapter(
 
     class SentTextViewHolder(private val binding: ItemMessageSentBinding) :
         RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage) {
+        fun bind(msg: ChatMessage, findQuote: (Long) -> ChatMessage?) {
             binding.tvMessageBody.text = msg.messageText ?: ""
-            binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
+            binding.tvTimestamp.text = TimeFormatHelper.formatMessageTime(msg.createdAt)
             updateTicks(binding.ivTicks, msg.status)
+
+            binding.layoutPinned.visibility = if (msg.isPinned) View.VISIBLE else View.GONE
+
+            if (msg.replyToId != null) {
+                val quoted = findQuote(msg.replyToId)
+                binding.layoutReplyQuote.visibility = View.VISIBLE
+                binding.tvQuoteAuthor.text = if (quoted?.senderId == msg.senderId) "You" else "User"
+                binding.tvQuoteText.text = quoted?.messageText ?: "Quoted message"
+            } else {
+                binding.layoutReplyQuote.visibility = View.GONE
+            }
+
+            val rxText = formatReactions(msg.reactions)
+            if (rxText.isNotEmpty()) {
+                binding.tvReactionsBadge.text = rxText
+                binding.tvReactionsBadge.visibility = View.VISIBLE
+            } else {
+                binding.tvReactionsBadge.visibility = View.GONE
+            }
         }
     }
 
     class ReceivedTextViewHolder(private val binding: ItemMessageReceivedBinding) :
         RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage) {
+        fun bind(msg: ChatMessage, findQuote: (Long) -> ChatMessage?) {
             binding.tvReceivedMessageBody.text = msg.messageText ?: ""
-            binding.tvReceivedTimestamp.text = formatTimestamp(msg.createdAt)
+            binding.tvReceivedTimestamp.text = TimeFormatHelper.formatMessageTime(msg.createdAt)
+
+            binding.layoutReceivedPinned.visibility = if (msg.isPinned) View.VISIBLE else View.GONE
+
+            if (msg.replyToId != null) {
+                val quoted = findQuote(msg.replyToId)
+                binding.layoutReceivedReplyQuote.visibility = View.VISIBLE
+                binding.tvReceivedQuoteAuthor.text = if (quoted?.senderId == msg.senderId) "User" else "You"
+                binding.tvReceivedQuoteText.text = quoted?.messageText ?: "Quoted message"
+            } else {
+                binding.layoutReceivedReplyQuote.visibility = View.GONE
+            }
+
+            val rxText = formatReactions(msg.reactions)
+            if (rxText.isNotEmpty()) {
+                binding.tvReceivedReactionsBadge.text = rxText
+                binding.tvReceivedReactionsBadge.visibility = View.VISIBLE
+            } else {
+                binding.tvReceivedReactionsBadge.visibility = View.GONE
+            }
         }
     }
 
@@ -694,10 +777,21 @@ class ChatAdapter(
     }
 }
 
+private fun formatReactions(reactions: Map<String, List<Int>>?): String {
+    if (reactions.isNullOrEmpty()) return ""
+    return reactions.entries
+        .filter { it.value.isNotEmpty() }
+        .joinToString(" ") { (emoji, users) ->
+            if (users.size > 1) "$emoji ${users.size}" else emoji
+        }
+}
+
 private fun updateTicks(imageView: ImageView, status: String) {
     when (status) {
         "UPLOADING", "PENDING" -> {
-            imageView.visibility = View.GONE
+            imageView.visibility = View.VISIBLE
+            imageView.setImageResource(R.drawable.ic_recording_dot)
+            imageView.setColorFilter(ContextCompat.getColor(imageView.context, R.color.text_muted))
         }
         "READ" -> {
             imageView.visibility = View.VISIBLE

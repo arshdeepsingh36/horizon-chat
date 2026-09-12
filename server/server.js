@@ -14,6 +14,7 @@ import {
   findUserById,
   createUser,
   lookupUser,
+  searchUsers,
   getMessagesCursor,
   saveMessageTRD,
   updateMessageStatus,
@@ -26,7 +27,11 @@ import {
   unblockUser,
   isUserBlocked,
   reportUser,
-  clearConversationMessages
+  clearConversationMessages,
+  toggleMessageReaction,
+  deleteMessage,
+  pinMessage,
+  markConversationRead
 } from './db.js';
 
 dotenv.config();
@@ -170,7 +175,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   }
 });
 
-// 3. User Lookup (TRD Section 3.4 & Phase 2b)
+// 3. User Lookup (Discovery - supports path and query param)
 app.get('/api/users/lookup', authenticateToken, async (req, res) => {
   try {
     const query = req.query.username;
@@ -194,6 +199,72 @@ app.get('/api/users/lookup', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[LOOKUP ERROR]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/users/lookup/:username', authenticateToken, async (req, res) => {
+  try {
+    const user = await lookupUser(req.params.username);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const blocked = await isUserBlocked(req.user.id, user.id);
+
+    return res.json({
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name || user.username,
+      bioStatus: user.bio_status || 'Hey there! I am using Horizon Chat.',
+      avatarUrl: user.avatar_url || null,
+      lastSeen: user.last_seen || null,
+      online: isUserOnline(user.id),
+      isBlocked: blocked
+    });
+  } catch (err) {
+    console.error('[LOOKUP ERROR]', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Dynamic User Search (Phase 2C Task 5)
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+  try {
+    const q = req.query.q || '';
+    const users = await searchUsers(q, req.user.id);
+    const enriched = users.map(u => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.display_name || u.username,
+      bioStatus: u.bio_status || 'Hey there! I am using Horizon Chat.',
+      avatarUrl: u.avatar_url || null,
+      lastSeen: u.last_seen || null,
+      online: isUserOnline(u.id)
+    }));
+    return res.json(enriched);
+  } catch (err) {
+    console.error('[SEARCH USERS ERROR]', err);
+    return res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+// Batch Mark Read Endpoint (Phase 2C Step 2)
+app.post('/api/messages/batch-read', authenticateToken, async (req, res) => {
+  try {
+    const { partnerId } = req.body || {};
+    if (!partnerId) return res.status(400).json({ error: 'partnerId is required' });
+    await markConversationRead(req.user.id, Number(partnerId));
+
+    // Notify partner via socket
+    const pSockets = onlineUsers.get(Number(partnerId));
+    if (pSockets) {
+      pSockets.forEach(sockId => {
+        io.to(sockId).emit('conversation_read', { readBy: req.user.id });
+        io.to(sockId).emit('message_read_ack', { all: true, readBy: req.user.id });
+      });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[BATCH READ ERROR]', err);
+    return res.status(500).json({ error: 'Failed to mark conversation read' });
   }
 });
 
@@ -704,23 +775,110 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Read Receipt Acknowledgement (TRD Section 4.3)
-  socket.on('mark_read', async ({ messageId, senderId }) => {
-    if (!messageId) return;
-
+  // Message Reactions (Phase 2C Step 3)
+  socket.on('message_reaction', async ({ messageId, recipientId, emoji }) => {
+    if (!messageId || !emoji) return;
     try {
-      await updateMessageStatus(messageId, 'READ');
+      const updated = await toggleMessageReaction(Number(messageId), userId, emoji);
+      if (updated) {
+        const payload = {
+          messageId: Number(messageId),
+          reactions: updated.reactions,
+          userId,
+          emoji
+        };
+        const rId = Number(recipientId);
+        const rSockets = onlineUsers.get(rId);
+        if (rSockets) {
+          rSockets.forEach(sId => io.to(sId).emit('message_reacted', payload));
+        }
+        const sSockets = onlineUsers.get(userId);
+        if (sSockets) {
+          sSockets.forEach(sId => io.to(sId).emit('message_reacted', payload));
+        }
+      }
+    } catch (err) {
+      console.error('[REACTION ERROR]', err);
+    }
+  });
 
-      // Emit message_read_ack to sender active socket
-      const sId = Number(senderId);
-      const senderSockets = onlineUsers.get(sId);
-      if (senderSockets) {
-        senderSockets.forEach(sockId => {
-          io.to(sockId).emit('message_read_ack', { messageId: Number(messageId) });
+  // Delete Message (Phase 2C Task 3.3)
+  socket.on('delete_message', async ({ messageId, recipientId, mode }) => {
+    if (!messageId) return;
+    try {
+      const updated = await deleteMessage(Number(messageId), userId, mode || 'me');
+      if (updated) {
+        if (mode === 'everyone') {
+          const rId = Number(recipientId);
+          const rSockets = onlineUsers.get(rId);
+          if (rSockets) {
+            rSockets.forEach(sId => {
+              io.to(sId).emit('message_deleted', {
+                messageId: Number(messageId),
+                deletedForEveryone: true,
+                messageText: '🚫 This message was deleted'
+              });
+            });
+          }
+        }
+        const sSockets = onlineUsers.get(userId);
+        if (sSockets) {
+          sSockets.forEach(sId => {
+            io.to(sId).emit('message_deleted', {
+              messageId: Number(messageId),
+              deletedForEveryone: mode === 'everyone',
+              mode: mode || 'me',
+              messageText: mode === 'everyone' ? '🚫 This message was deleted' : undefined
+            });
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[DELETE MESSAGE ERROR]', err);
+    }
+  });
+
+  // Pin Message (Phase 2C Task 3.3)
+  socket.on('pin_message', async ({ messageId, recipientId, isPinned }) => {
+    if (!messageId) return;
+    try {
+      const updated = await pinMessage(Number(messageId), Boolean(isPinned));
+      if (updated) {
+        const payload = {
+          messageId: Number(messageId),
+          isPinned: updated.isPinned,
+          message: updated
+        };
+        const rId = Number(recipientId);
+        const rSockets = onlineUsers.get(rId);
+        if (rSockets) {
+          rSockets.forEach(sId => io.to(sId).emit('message_pinned', payload));
+        }
+        const sSockets = onlineUsers.get(userId);
+        if (sSockets) {
+          sSockets.forEach(sId => io.to(sId).emit('message_pinned', payload));
+        }
+      }
+    } catch (err) {
+      console.error('[PIN MESSAGE ERROR]', err);
+    }
+  });
+
+  // Batch Read Receipt (Phase 2C Step 2)
+  socket.on('mark_conversation_read', async ({ partnerId }) => {
+    if (!partnerId) return;
+    try {
+      const pId = Number(partnerId);
+      await markConversationRead(userId, pId);
+      const partnerSockets = onlineUsers.get(pId);
+      if (partnerSockets) {
+        partnerSockets.forEach(sockId => {
+          io.to(sockId).emit('conversation_read', { readBy: userId });
+          io.to(sockId).emit('message_read_ack', { all: true, readBy: userId });
         });
       }
     } catch (err) {
-      console.error('[MARK READ ERROR]', err);
+      console.error('[CONVERSATION READ ERROR]', err);
     }
   });
 

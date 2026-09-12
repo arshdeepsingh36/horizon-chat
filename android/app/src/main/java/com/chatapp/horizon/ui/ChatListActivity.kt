@@ -3,6 +3,9 @@ package com.chatapp.horizon.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
 import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -10,28 +13,34 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.chatapp.horizon.databinding.ActivityChatListBinding
+import com.chatapp.horizon.models.ChatMessage
+import com.chatapp.horizon.models.Conversation
+import com.chatapp.horizon.models.User
 import com.chatapp.horizon.network.ApiClient
-import io.socket.client.IO
+import com.chatapp.horizon.network.MessageDispatchManager
+import com.chatapp.horizon.utils.HorizonNotificationManager
 import io.socket.client.Socket
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import org.json.JSONObject
 
-class ChatListActivity : AppCompatActivity() {
+class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageStatusListener {
 
     private lateinit var binding: ActivityChatListBinding
     private lateinit var adapter: ChatListAdapter
-    private var mSocket: Socket? = null
 
     private var authToken: String = ""
     private var currentUserId: Int = 1
     private var currentUsername: String = "User"
 
+    private var cachedConversations = mutableListOf<Conversation>()
+    private var searchJob: Job? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityChatListBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        HorizonNotificationManager.init(this)
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
         authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("token", "") ?: ""
@@ -39,13 +48,21 @@ class ChatListActivity : AppCompatActivity() {
         currentUsername = intent.getStringExtra("CURRENT_USERNAME") ?: prefs.getString("username", "User") ?: "User"
 
         setupUI()
-        setupSocket()
+        setupSearch()
+        initSocketAndQueue()
         loadChats()
     }
 
     override fun onResume() {
         super.onResume()
+        HorizonNotificationManager.activeChatPartnerId = null
+        MessageDispatchManager.addListener(this)
         loadChats()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        MessageDispatchManager.removeListener(this)
     }
 
     private fun setupUI() {
@@ -71,51 +88,97 @@ class ChatListActivity : AppCompatActivity() {
         }
 
         binding.fabNewChat.setOnClickListener {
-            showNewChatDialog()
+            binding.etSearchUsers.requestFocus()
         }
     }
 
-    private fun setupSocket() {
+    private fun setupSearch() {
+        binding.btnClearSearch.setOnClickListener {
+            binding.etSearchUsers.setText("")
+        }
+
+        binding.etSearchUsers.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString()?.trim() ?: ""
+                binding.btnClearSearch.visibility = if (query.isNotEmpty()) View.VISIBLE else View.GONE
+                performDynamicSearch(query)
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+    }
+
+    private fun performDynamicSearch(query: String) {
+        searchJob?.cancel()
+        if (query.isEmpty()) {
+            binding.tvEmptySearch.visibility = View.GONE
+            adapter.setChats(cachedConversations)
+            return
+        }
+
+        searchJob = lifecycleScope.launch(Dispatchers.IO) {
+            delay(250) // Debounce 250ms
+
+            // 1. Filter local cached chats by username or display name
+            val localMatches = cachedConversations.filter {
+                it.partnerUsername.contains(query, ignoreCase = true) ||
+                        (it.partnerDisplayName?.contains(query, ignoreCase = true) == true)
+            }.toMutableList()
+
+            // 2. Query remote directory search for prefix / substring match across username and display_name (Task 5.1 & 5.2)
+            try {
+                val res = ApiClient.apiService.searchUsers("Bearer $authToken", query)
+                if (res.isSuccessful && res.body() != null) {
+                    val remoteUsers = res.body()!!
+                    for (u in remoteUsers) {
+                        if (localMatches.none { it.partnerId == u.id }) {
+                            localMatches.add(
+                                Conversation(
+                                    partnerId = u.id,
+                                    partnerUsername = u.username,
+                                    partnerDisplayName = u.displayName ?: u.username,
+                                    partnerAvatarUrl = u.avatarUrl,
+                                    partnerBioStatus = u.bioStatus,
+                                    lastMessage = null,
+                                    unreadCount = 0,
+                                    online = u.online
+                                )
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            withContext(Dispatchers.Main) {
+                adapter.setChats(localMatches)
+                binding.tvEmptySearch.visibility = if (localMatches.isEmpty()) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun initSocketAndQueue() {
         if (authToken.isEmpty()) return
-        try {
-            val options = IO.Options().apply {
-                auth = mapOf("token" to authToken)
-                reconnection = true
-            }
-            val serverUrl = ApiClient.BASE_URL.trimEnd('/')
-            mSocket = IO.socket(serverUrl, options)
+        MessageDispatchManager.initSocket(authToken, currentUserId)
 
-            mSocket?.on("user_typing") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val uId = data?.optInt("userId") ?: return@on
-                    val isTyping = data.optBoolean("isTyping", false)
-                    runOnUiThread {
-                        adapter.setTyping(uId, isTyping)
-                    }
-                }
+        val socket = MessageDispatchManager.getSocket()
+        socket?.on("user_typing") { args ->
+            if (args.isNotEmpty()) {
+                val data = args[0] as? JSONObject
+                val uId = data?.optInt("userId") ?: return@on
+                val isTyping = data.optBoolean("isTyping", false)
+                runOnUiThread { adapter.setTyping(uId, isTyping) }
             }
+        }
 
-            mSocket?.on("user_status_changed") { args ->
-                if (args.isNotEmpty()) {
-                    val data = args[0] as? JSONObject
-                    val uId = data?.optInt("userId") ?: return@on
-                    val status = data.optString("status", "offline")
-                    runOnUiThread {
-                        adapter.setUserOnline(uId, status == "online")
-                    }
-                }
+        socket?.on("user_status_changed") { args ->
+            if (args.isNotEmpty()) {
+                val data = args[0] as? JSONObject
+                val uId = data?.optInt("userId") ?: return@on
+                val status = data.optString("status", "offline")
+                runOnUiThread { adapter.setUserOnline(uId, status == "online") }
             }
-
-            mSocket?.on("new_message") {
-                runOnUiThread {
-                    loadChats()
-                }
-            }
-
-            mSocket?.connect()
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 
@@ -127,8 +190,13 @@ class ChatListActivity : AppCompatActivity() {
                 val response = ApiClient.apiService.getChats("Bearer $authToken")
                 if (response.isSuccessful && response.body() != null) {
                     val chats = response.body()!!
+                    cachedConversations.clear()
+                    cachedConversations.addAll(chats)
                     withContext(Dispatchers.Main) {
-                        adapter.setChats(chats)
+                        if (binding.etSearchUsers.text.isNullOrEmpty()) {
+                            adapter.setChats(chats)
+                            binding.tvEmptySearch.visibility = if (chats.isEmpty()) View.VISIBLE else View.GONE
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -137,56 +205,42 @@ class ChatListActivity : AppCompatActivity() {
         }
     }
 
-    private fun showNewChatDialog() {
-        val input = EditText(this).apply {
-            hint = "Enter @username"
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Start New Chat")
-            .setMessage("Search for a user in the Horizon directory:")
-            .setView(input)
-            .setPositiveButton("Search") { _, _ ->
-                val query = input.text.toString().trim().lowercase().removePrefix("@")
-                if (query.isNotEmpty()) {
-                    lookupAndOpenChat(query)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+    // MessageStatusListener Implementations
+    override fun onMessageDispatched(localClientId: String, serverMessage: ChatMessage) {
+        runOnUiThread { loadChats() }
     }
 
-    private fun lookupAndOpenChat(username: String) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val response = ApiClient.apiService.lookupUser("Bearer $authToken", username)
-                withContext(Dispatchers.Main) {
-                    if (response.isSuccessful && response.body() != null) {
-                        val user = response.body()!!
-                        val intent = Intent(this@ChatListActivity, ChatActivity::class.java).apply {
-                            putExtra("CURRENT_USER_ID", currentUserId)
-                            putExtra("TARGET_USER_ID", user.id)
-                            putExtra("TARGET_USERNAME", user.username)
-                            putExtra("TARGET_DISPLAY_NAME", user.displayName ?: user.username)
-                            putExtra("TARGET_AVATAR_URL", user.avatarUrl)
-                            putExtra("AUTH_TOKEN", authToken)
-                        }
-                        startActivity(intent)
-                    } else {
-                        Toast.makeText(this@ChatListActivity, "User @$username not found", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatListActivity, "Lookup error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-                }
-            }
+    override fun onMessageStatusChanged(messageId: Long, newStatus: String) {
+        runOnUiThread { loadChats() }
+    }
+
+    override fun onIncomingMessage(message: ChatMessage) {
+        runOnUiThread {
+            loadChats()
+            // Trigger push notification if in background or outside this conversation (Task 7)
+            val partner = cachedConversations.find { it.partnerId == message.senderId }
+            val senderName = partner?.partnerDisplayName ?: partner?.partnerUsername ?: "User @${message.senderId}"
+            val senderUsername = partner?.partnerUsername ?: "user_${message.senderId}"
+
+            HorizonNotificationManager.showIncomingMessageNotification(
+                this,
+                message,
+                senderUsername,
+                senderName,
+                currentUserId,
+                authToken
+            )
         }
     }
+
+    override fun onMessageReacted(messageId: Long, reactions: Map<String, List<Int>>) {}
+    override fun onMessageDeleted(messageId: Long, deletedForEveryone: Boolean, messageText: String?) {
+        runOnUiThread { loadChats() }
+    }
+    override fun onMessagePinned(messageId: Long, isPinned: Boolean) {}
 
     override fun onDestroy() {
         super.onDestroy()
-        mSocket?.disconnect()
-        mSocket?.off()
+        MessageDispatchManager.removeListener(this)
     }
 }

@@ -9,6 +9,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.chatapp.horizon.databinding.ItemConversationBinding
 import com.chatapp.horizon.models.Conversation
+import com.chatapp.horizon.utils.AvatarHelper
+import com.chatapp.horizon.utils.TimeFormatHelper
 
 class ChatListAdapter(
     private val onChatClicked: (Conversation) -> Unit
@@ -57,20 +59,19 @@ class ChatListAdapter(
             val displayName = chat.partnerDisplayName ?: "@$username"
             binding.tvUsername.text = displayName
 
-            if (!chat.partnerAvatarUrl.isNullOrEmpty()) {
-                binding.tvAvatarInitials.visibility = View.GONE
-                binding.ivAvatar.visibility = View.VISIBLE
-                Glide.with(binding.root.context)
-                    .load(chat.partnerAvatarUrl)
-                    .circleCrop()
-                    .into(binding.ivAvatar)
-            } else {
-                binding.ivAvatar.visibility = View.GONE
-                binding.tvAvatarInitials.visibility = View.VISIBLE
-                binding.tvAvatarInitials.text = username.take(2).uppercase()
-            }
+            AvatarHelper.setupAvatar(
+                binding.ivAvatar,
+                binding.tvAvatarInitials,
+                chat.partnerAvatarUrl,
+                displayName
+            )
 
             binding.viewOnlineDot.visibility = if (chat.online) View.VISIBLE else View.GONE
+
+            // Bind exact localized timestamp (Fixing static 12:00 bug - Task 8)
+            val timeStr = TimeFormatHelper.formatConversationTimestamp(chat.lastMessage?.createdAt)
+            binding.tvTimestamp.text = timeStr
+            binding.tvTimestamp.visibility = if (timeStr.isNotEmpty()) View.VISIBLE else View.GONE
 
             if (chat.isTyping) {
                 binding.tvLastSnippet.text = "typing..."
