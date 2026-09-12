@@ -40,7 +40,15 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace --info
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_output.txt
+
+      - name: Publish Build Error Log on Failure
+        if: failure()
+        run: |
+          gh release create build-error-log /tmp/gradle_output.txt --title "Build Error Log" --notes "Latest build failure log" --clobber || gh release upload build-error-log /tmp/gradle_output.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare Distribution Files
         run: |
