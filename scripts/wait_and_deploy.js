@@ -50,49 +50,23 @@ function sleep(ms) {
 }
 
 async function waitForAndDownloadApk() {
-  const b64Urls = [
-    `https://raw.githubusercontent.com/${REPO}/apk-dist/app-debug.b64`,
-    `https://raw.githubusercontent.com/${REPO}/apk-dist/dist_apk/app-debug.b64`
-  ];
-  const tempUrlEndpoint = `https://raw.githubusercontent.com/${REPO}/apk-dist/temp_url.txt`;
   const releaseUrl = `https://github.com/${REPO}/releases/download/v2.0-latest/app-debug.apk`;
-  console.log(`--- Waiting for fresh APK build on GitHub ---`);
+  console.log(`--- Waiting for fresh APK build on GitHub Releases ---`);
 
   let attempts = 0;
   while (attempts < 120) {
     attempts++;
     console.log(`[${new Date().toLocaleTimeString()}] Attempt ${attempts}: Checking for updated APK...`);
 
-    // 1. Try base64 artifact from apk-dist branch
-    for (const url of b64Urls) {
-      try {
-        const b64Data = await fetchString(url);
-        if (b64Data && b64Data.length > 500000) {
-          const buf = Buffer.from(b64Data.trim(), 'base64');
-          fs.writeFileSync(LOCAL_APK, buf);
-          console.log(`✅ Decoded fresh APK: ${buf.length} bytes (${(buf.length / 1024 / 1024).toFixed(2)} MB) from ${url}`);
-          return true;
-        }
-      } catch (e) {
-        // Branch not created yet or in-flight
-      }
-    }
-
-    // 2. Try temp_url.txt
     try {
-      const tempUrl = await fetchString(tempUrlEndpoint);
-      if (tempUrl && tempUrl.startsWith('http')) {
-        const directUrl = tempUrl.trim();
-        console.log(`Found direct temp mirror URL: ${directUrl}`);
-        const tempApk = path.resolve(LOCAL_DIR, 'temp.apk');
-        await downloadBinary(directUrl, tempApk);
-        const stats = fs.statSync(tempApk);
-        if (stats.size > 5 * 1024 * 1024) {
-          fs.copyFileSync(tempApk, LOCAL_APK);
-          fs.unlinkSync(tempApk);
-          console.log(`✅ Downloaded APK from mirror: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
-          return true;
-        }
+      const tempApk = path.resolve(LOCAL_DIR, 'temp.apk');
+      await downloadBinary(releaseUrl, tempApk);
+      const stats = fs.statSync(tempApk);
+      if (stats.size > 5 * 1024 * 1024) {
+        fs.copyFileSync(tempApk, LOCAL_APK);
+        fs.unlinkSync(tempApk);
+        console.log(`✅ Downloaded release APK: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+        return true;
       }
     } catch (e) {
       // In-flight

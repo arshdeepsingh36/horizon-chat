@@ -42,46 +42,27 @@ jobs:
         run: |
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
 
-      - name: Deploy and Distribute APK
+      - name: Prepare Distribution Files
         run: |
           mkdir -p /tmp/dist
           find . -name "*debug*.apk" -exec cp {} /tmp/dist/app-debug.apk \;
           cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk
           ls -la /tmp/dist/
-          cd /tmp/dist
-          base64 -w 0 app-debug.apk > app-debug.b64
-          curl -s -F "file=@app-debug.apk" https://temp.sh/upload > temp_url.txt || true
-          echo "Temp URL:"
-          cat temp_url.txt || true
-          
-          cd $GITHUB_WORKSPACE
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B apk-dist
-          git rm -rf . || true
-          cp /tmp/dist/app-debug.apk ./app-debug.apk
-          cp /tmp/dist/horizon-chat-v2.0.0.apk ./horizon-chat-v2.0.0.apk
-          cp /tmp/dist/app-debug.b64 ./app-debug.b64
-          cp /tmp/dist/temp_url.txt ./temp_url.txt
-          git add -f app-debug.apk horizon-chat-v2.0.0.apk app-debug.b64 temp_url.txt
-          git commit -m "deploy: update fresh app-debug.apk and horizon-chat-v2.0.0.apk [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" apk-dist
 
-      - name: Report Build Error
-        if: failure()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B build-error-log
-          cp build.log error.txt || true
-          git add -f error.txt
-          git commit -m "ci: dump full build log"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" build-error-log
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: horizon-chat-apk
+          path: /tmp/dist/*.apk
+          retention-days: 30
 
-      - name: Publish Release Asset (Optional)
-        continue-on-error: true
+      - name: Publish GitHub Release Asset
         run: |
-          gh release create v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." --clobber || (gh release upload v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk --clobber)
+          gh release create v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk \
+            --title "Horizon Chat v2.0 Latest Debug Build" \
+            --notes "Horizon Chat build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." \
+            --clobber || \
+          gh release upload v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

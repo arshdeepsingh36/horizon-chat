@@ -31,26 +31,18 @@ function downloadBinary(url, destPath) {
 }
 
 async function main() {
-  console.log('Fetching temp_url.txt from apk-dist...');
-  try {
-    const tempUrl = await fetch('https://raw.githubusercontent.com/arshdeepsingh36/horizon-chat/apk-dist/temp_url.txt');
-    console.log('tempUrl content:', tempUrl);
-    if (tempUrl && tempUrl.startsWith('http')) {
-      console.log('Downloading directly from mirror:', tempUrl.trim());
-      await downloadBinary(tempUrl.trim(), dest);
-      const st = fs.statSync(dest);
-      console.log('✅ Downloaded fresh APK:', st.size, 'bytes (', (st.size / 1024 / 1024).toFixed(2), 'MB )');
-      return;
-    }
-  } catch (e) {
-    console.log('Mirror download note:', e.message);
-  }
+  const dir = path.dirname(dest);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  console.log('Falling back to raw base64 decoding...');
-  const b64 = await fetch('https://raw.githubusercontent.com/arshdeepsingh36/horizon-chat/apk-dist/app-debug.b64');
-  const buf = Buffer.from(b64.trim(), 'base64');
-  fs.writeFileSync(dest, buf);
-  console.log('✅ Decoded fresh APK:', buf.length, 'bytes');
+  const releaseUrl = 'https://github.com/arshdeepsingh36/horizon-chat/releases/download/v2.0-latest/app-debug.apk';
+  console.log('Fetching latest APK from GitHub Releases:', releaseUrl);
+  try {
+    await downloadBinary(releaseUrl, dest);
+    const st = fs.statSync(dest);
+    console.log('✅ Downloaded latest APK successfully:', st.size, 'bytes (', (st.size / 1024 / 1024).toFixed(2), 'MB )');
+  } catch (e) {
+    console.error('Download failed:', e.message);
+  }
 }
 
 main().catch(console.error);
