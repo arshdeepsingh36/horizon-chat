@@ -43,12 +43,16 @@ jobs:
           set -o pipefail
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle_output.txt
 
-      - name: Publish Build Error Log on Failure
+      - name: Push Error Log to Git
         if: failure()
         run: |
-          gh release create build-error-log /tmp/gradle_output.txt --title "Build Error Log" --notes "Latest build failure log" --clobber || gh release upload build-error-log /tmp/gradle_output.txt --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B build-logs
+          cp /tmp/gradle_output.txt ./build_error.log || echo "No log file found" > ./build_error.log
+          git add build_error.log
+          git commit -m "ci: capture build error log" --allow-empty
+          git push origin build-logs --force
 
       - name: Prepare Distribution Files
         run: |
