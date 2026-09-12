@@ -21,12 +21,15 @@
 
 Directly install Horizon Chat onto your Android phone:
 
-* **[Download horizon-chat-v2.0.0.apk (7.85 MB)](./apk/horizon-chat-v2.0.0.apk?raw=true)**
-* **[Download app-debug.apk (7.85 MB)](./apk/app-debug.apk?raw=true)**
+* **[Download horizon-chat-v2.0.0.apk (Direct Mirror)](https://raw.githubusercontent.com/arshdeepsingh36/horizon-chat/apk-dist/app-debug.apk)**
+* **[Download app-debug.apk (Direct Raw)](https://raw.githubusercontent.com/arshdeepsingh36/horizon-chat/apk-dist/app-debug.apk)**
+* **[GitHub Releases (v2.0-latest)](https://github.com/arshdeepsingh36/horizon-chat/releases/tag/v2.0-latest)**
 
 ### Quick ADB Install
 ```bash
-adb install -r apk/horizon-chat-v2.0.0.apk
+# If cloned locally:
+node scripts/download_apk.js
+adb install -r apk/app-debug.apk
 ```
 
 ---

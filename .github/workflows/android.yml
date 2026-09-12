@@ -46,6 +46,7 @@ jobs:
         run: |
           mkdir -p /tmp/dist
           find . -name "*debug*.apk" -exec cp {} /tmp/dist/app-debug.apk \;
+          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk
           ls -la /tmp/dist/
           cd /tmp/dist
           base64 -w 0 app-debug.apk > app-debug.b64
@@ -59,10 +60,11 @@ jobs:
           git checkout -B apk-dist
           git rm -rf . || true
           cp /tmp/dist/app-debug.apk ./app-debug.apk
+          cp /tmp/dist/horizon-chat-v2.0.0.apk ./horizon-chat-v2.0.0.apk
           cp /tmp/dist/app-debug.b64 ./app-debug.b64
           cp /tmp/dist/temp_url.txt ./temp_url.txt
-          git add -f app-debug.apk app-debug.b64 temp_url.txt
-          git commit -m "deploy: update fresh app-debug.apk [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
+          git add -f app-debug.apk horizon-chat-v2.0.0.apk app-debug.b64 temp_url.txt
+          git commit -m "deploy: update fresh app-debug.apk and horizon-chat-v2.0.0.apk [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" apk-dist
 
       - name: Report Build Error
@@ -79,6 +81,7 @@ jobs:
       - name: Publish Release Asset (Optional)
         continue-on-error: true
         run: |
-          gh release create v2.0-latest /tmp/dist/app-debug.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." --clobber || gh release upload v2.0-latest /tmp/dist/app-debug.apk --clobber
+          gh release create v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk --title "Horizon Chat v2.0 Latest Debug Build" --notes "Horizon Chat Phase 2b complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." --clobber || (gh release upload v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk --clobber)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
