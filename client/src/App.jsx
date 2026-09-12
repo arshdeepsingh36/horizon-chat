@@ -109,6 +109,24 @@ export default function App() {
       );
     });
 
+    // Real-time user profile updates
+    s.on('user_profile_updated', (updatedUser) => {
+      if (Number(updatedUser.id) === Number(user.id)) {
+        setUser((prev) => {
+          const next = { ...prev, ...updatedUser };
+          localStorage.setItem('horizon_user', JSON.stringify(next));
+          return next;
+        });
+      }
+      setChats((prev) =>
+        prev.map((c) =>
+          Number(c.partnerId) === Number(updatedUser.id)
+            ? { ...c, partnerDisplayName: updatedUser.displayName, partnerAvatarUrl: updatedUser.avatarUrl }
+            : c
+        )
+      );
+    });
+
     setSocket(s);
 
     return () => {
@@ -119,6 +137,14 @@ export default function App() {
   const handleLogin = ({ token: newToken, user: newUser }) => {
     setToken(newToken);
     setUser(newUser);
+  };
+
+  const handleUpdateUser = (updatedFields) => {
+    setUser((prev) => {
+      const next = { ...prev, ...updatedFields };
+      localStorage.setItem('horizon_user', JSON.stringify(next));
+      return next;
+    });
   };
 
   const handleLogout = () => {
@@ -181,6 +207,7 @@ export default function App() {
             token={token}
             onBack={handleBackToChats}
             onMessageSent={() => refreshChats()}
+            onUpdateUser={handleUpdateUser}
           />
         ) : (
           <HorizonChatList
@@ -190,6 +217,7 @@ export default function App() {
             onLogout={handleLogout}
             apiBaseUrl={apiBaseUrl}
             token={token}
+            onUpdateUser={handleUpdateUser}
           />
         )}
 

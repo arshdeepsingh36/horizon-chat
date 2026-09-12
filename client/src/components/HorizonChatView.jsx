@@ -16,8 +16,15 @@ import {
   Film,
   ExternalLink,
   Share2,
-  X
+  X,
+  Eye,
+  Trash2,
+  Radio,
+  Sparkles,
+  Camera,
+  FolderOpen
 } from 'lucide-react';
+import { uploadToR2 } from '../utils/r2Upload';
 
 // Helper to normalize message objects across snake_case and camelCase
 function normalizeMsg(m) {
@@ -27,10 +34,13 @@ function normalizeMsg(m) {
   const recipientId = Number(m.recipientId ?? m.recipient_id);
   const text = m.text ?? m.message_text ?? m.messageText ?? '';
   const attachmentType = m.attachmentType ?? m.attachment_type ?? 'NONE';
-  const attachmentUrl = m.attachmentUrl ?? m.attachment_url ?? null;
+  const attachmentUrl = m.attachmentUrl ?? m.attachment_url ?? m.mediaUrl ?? m.media_url ?? null;
+  const r2Key = m.r2Key ?? m.r2_key ?? null;
   const thumbnailBlur = m.thumbnailBlur ?? m.thumbnail_blur ?? null;
   const fileSizeBytes = Number(m.fileSizeBytes ?? m.file_size_bytes ?? 0);
   const status = m.status || 'SENT';
+  const isViewOnce = Boolean(m.isViewOnce ?? m.is_view_once);
+  const isViewed = Boolean(m.isViewed ?? m.is_view_viewed ?? m.is_viewed);
   const createdAt = m.createdAt ?? m.created_at ?? new Date().toISOString();
   const pending = Boolean(m.pending);
 
@@ -41,9 +51,12 @@ function normalizeMsg(m) {
     text,
     attachmentType,
     attachmentUrl,
+    r2Key,
     thumbnailBlur,
     fileSizeBytes,
     status,
+    isViewOnce,
+    isViewed,
     createdAt,
     pending
   };
@@ -71,7 +84,23 @@ export default function HorizonChatView({
   const [lightboxMedia, setLightboxMedia] = useState(null); // { type: 'IMAGE'|'VIDEO', url, title, sender, timestamp, caption }
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState('media'); // 'media' | 'docs' | 'links'
+
+  // Cloudflare R2 Direct Upload & Voice Recording states
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [isViewOnceSelected, setIsViewOnceSelected] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+
   const activeAudioRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+
+  const imageInputRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const audioInputRef = useRef(null);
+  const docInputRef = useRef(null);
 
   const canvasRef = useRef(null);
   const isFirstLoadRef = useRef(true);
@@ -222,14 +251,22 @@ export default function HorizonChatView({
       }
     };
 
+    const handleMediaViewed = ({ messageId }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === Number(messageId) ? { ...m, isViewed: true } : m))
+      );
+    };
+
     socket.on('new_message', handleNewMessage);
     socket.on('message_read_ack', handleReadAck);
     socket.on('user_status_changed', handleStatusChanged);
+    socket.on('media_viewed', handleMediaViewed);
 
     return () => {
       socket.off('new_message', handleNewMessage);
       socket.off('message_read_ack', handleReadAck);
       socket.off('user_status_changed', handleStatusChanged);
+      socket.off('media_viewed', handleMediaViewed);
     };
   }, [socket, partner.id]);
 
@@ -325,95 +362,180 @@ export default function HorizonChatView({
     );
   };
 
-  // 5. Send Real Media File with Micro-Preview
-  const fileInputRef = useRef(null);
+  // 5. Cloudflare R2 Direct Binary Upload Pipeline
+  const handleUploadAndSendMedia = async (file, category, attachmentType, viewOnce = isViewOnceSelected) => {
+    if (!file || !socket) return;
+    setUploadingMedia(true);
 
-  const handleAttachClick = () => {
-    fileInputRef.current?.click();
+    const optimisticId = Date.now();
+    let localPreviewUrl = null;
+    try {
+      if (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/'))) {
+        localPreviewUrl = URL.createObjectURL(file);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    const optimisticMsg = {
+      id: optimisticId,
+      senderId: Number(user.id),
+      recipientId: Number(partner.id),
+      text: file.name || (attachmentType === 'VIDEO' ? 'Video' : (attachmentType === 'AUDIO' ? 'Voice Note' : 'Attachment')),
+      attachmentType,
+      attachmentUrl: localPreviewUrl,
+      thumbnailBlur: null,
+      fileSizeBytes: file.size || 0,
+      status: isPartnerOnline ? 'DELIVERED' : 'SENT',
+      isViewOnce: Boolean(viewOnce),
+      isViewed: false,
+      createdAt: new Date().toISOString(),
+      pending: true
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setTimeout(() => {
+      if (canvasRef.current) canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
+    }, 20);
+
+    try {
+      // Direct binary PUT upload to Cloudflare R2
+      const { publicUrl, key } = await uploadToR2({
+        file,
+        uploadType: 'chat_media',
+        recipientUsername: partner.username,
+        mediaType: category,
+        isViewOnce: Boolean(viewOnce),
+        apiBaseUrl,
+        token
+      });
+
+      socket.emit(
+        'send_message',
+        {
+          recipientId: partner.id,
+          text: file.name || (attachmentType === 'VIDEO' ? 'Video' : (attachmentType === 'AUDIO' ? 'Voice Note' : 'Attachment')),
+          attachmentType,
+          attachmentUrl: publicUrl,
+          mediaUrl: publicUrl,
+          r2Key: key,
+          fileSizeBytes: file.size || 0,
+          isViewOnce: Boolean(viewOnce)
+        },
+        (response) => {
+          if (response?.success && response.message) {
+            const saved = normalizeMsg(response.message);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === optimisticId ? saved : m))
+            );
+            if (onMessageSent) onMessageSent();
+          }
+        }
+      );
+    } catch (err) {
+      console.error('[R2 DIRECT UPLOAD ERROR]', err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === optimisticId ? { ...m, text: `${m.text} (Upload failed)`, pending: false } : m))
+      );
+    } finally {
+      setUploadingMedia(false);
+      setIsViewOnceSelected(false);
+      setShowAttachMenu(false);
+    }
   };
 
-  const handleFileChange = async (e) => {
+  const handleFileChange = async (e, forcedCategory = null, forcedType = null) => {
     const file = e.target.files?.[0];
-    if (!file || !socket) return;
+    if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result;
-      if (!base64) return;
+    let attachmentType = forcedType;
+    let category = forcedCategory;
 
-      try {
-        const res = await fetch(`${apiBaseUrl}/api/media/upload`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            imageBase64: base64,
-            fileName: file.name,
-            fileSizeBytes: file.size
-          })
-        });
-        const mediaData = await res.json();
-        const finalUrl = mediaData?.attachmentUrl || base64;
-
-        let attachmentType = 'IMAGE';
-        if (file.type.startsWith('video/')) {
-          attachmentType = 'VIDEO';
-        } else if (file.type.startsWith('audio/')) {
-          attachmentType = 'AUDIO';
-        } else if (file.type.startsWith('image/')) {
-          attachmentType = 'IMAGE';
-        } else {
-          attachmentType = 'DOCUMENT';
-        }
-
-        const optimisticId = Date.now();
-        const optimisticMsg = {
-          id: optimisticId,
-          senderId: Number(user.id),
-          recipientId: Number(partner.id),
-          text: file.name || (attachmentType === 'VIDEO' ? 'Video' : 'Attachment'),
-          attachmentType,
-          attachmentUrl: finalUrl,
-          thumbnailBlur: mediaData?.thumbnailBlur || (attachmentType === 'IMAGE' ? base64 : null),
-          fileSizeBytes: file.size,
-          status: isPartnerOnline ? 'DELIVERED' : 'SENT',
-          createdAt: new Date().toISOString()
-        };
-
-        setMessages((prev) => [...prev, optimisticMsg]);
-        setTimeout(() => {
-          if (canvasRef.current) canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
-        }, 20);
-
-        socket.emit(
-          'send_message',
-          {
-            recipientId: partner.id,
-            text: file.name || (attachmentType === 'VIDEO' ? 'Video' : 'Attachment'),
-            attachmentType,
-            attachmentUrl: finalUrl,
-            thumbnailBlur: mediaData?.thumbnailBlur || (attachmentType === 'IMAGE' ? base64 : null),
-            fileSizeBytes: file.size
-          },
-          (response) => {
-            if (response?.success && response.message) {
-              const saved = normalizeMsg(response.message);
-              setMessages((prev) =>
-                prev.map((m) => (m.id === optimisticId ? saved : m))
-              );
-              if (onMessageSent) onMessageSent();
-            }
-          }
-        );
-      } catch (err) {
-        console.error('[ATTACH FILE ERROR]', err);
+    if (!attachmentType || !category) {
+      if (file.type.startsWith('image/')) {
+        attachmentType = 'IMAGE';
+        category = 'image';
+      } else if (file.type.startsWith('video/')) {
+        attachmentType = 'VIDEO';
+        category = 'video';
+      } else if (file.type.startsWith('audio/')) {
+        attachmentType = 'AUDIO';
+        category = 'voice';
+      } else {
+        attachmentType = 'DOCUMENT';
+        category = 'others';
       }
-    };
-    reader.readAsDataURL(file);
-    // Reset file input value so selecting the same file again triggers onChange
+    }
+
+    await handleUploadAndSendMedia(file, category, attachmentType);
     e.target.value = '';
+  };
+
+  // Voice Note Recording with MediaRecorder
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (audioChunksRef.current.length === 0) return;
+
+        const mimeType = mediaRecorder.mimeType || 'audio/webm';
+        const ext = mimeType.includes('mp4') ? 'm4a' : 'webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        audioBlob.name = `voice_${Date.now()}.${ext}`;
+
+        await handleUploadAndSendMedia(audioBlob, 'voice', 'AUDIO');
+      };
+
+      mediaRecorder.start();
+      setIsRecordingVoice(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('[VOICE RECORDING ERROR]', err);
+      alert('Microphone access is required to record voice notes.');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && isRecordingVoice) {
+      clearInterval(recordingTimerRef.current);
+      mediaRecorderRef.current.stop();
+      setIsRecordingVoice(false);
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (mediaRecorderRef.current && isRecordingVoice) {
+      clearInterval(recordingTimerRef.current);
+      audioChunksRef.current = [];
+      try {
+        mediaRecorderRef.current.stream?.getTracks()?.forEach((track) => track.stop());
+      } catch (e) {
+        console.error(e);
+      }
+      mediaRecorderRef.current = null;
+      setIsRecordingVoice(false);
+      setRecordingDuration(0);
+    }
+  };
+
+  const formatRecordingTime = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   // 6. Tap-to-Download Media Handler (Rules Section 3: Blurhash/Micro-Preview mandatory)
@@ -461,7 +583,11 @@ export default function HorizonChatView({
               className={`horizon-cell-avatar ${isPartnerOnline ? 'online' : ''}`}
               style={{ width: '38px', height: '38px', fontSize: '14px' }}
             >
-              {(partner.username || 'User').slice(0, 2).toUpperCase()}
+              {partner.avatarUrl || partner.avatar_url ? (
+                <img src={partner.avatarUrl || partner.avatar_url} alt={partner.username} className="horizon-avatar-img" />
+              ) : (
+                (partner.username || 'User').slice(0, 2).toUpperCase()
+              )}
             </div>
 
             <div>
@@ -545,8 +671,57 @@ export default function HorizonChatView({
             return (
               <div key={msg.id} className={`horizon-msg-row ${isMe ? 'outgoing' : 'incoming'}`}>
                 <div className={`horizon-bubble ${isMe ? 'outgoing' : 'incoming'}`}>
-                  {/* Media / Micro-Preview Card (Rules Section 3 & TRD Section 5.3) */}
-                  {isMedia && (
+                  {/* View Once Media Bubble Presentation */}
+                  {msg.isViewOnce ? (
+                    <div style={{ marginBottom: '6px' }}>
+                      {(!isMe && msg.isViewed) ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                          <Eye size={16} />
+                          <span>View-once photo (Opened)</span>
+                        </div>
+                      ) : !isMe ? (
+                        <div
+                          onClick={() => {
+                            fetch(`${apiBaseUrl}/api/messages/${msg.id}/view-once`, {
+                              method: 'POST',
+                              headers: { Authorization: `Bearer ${token}` }
+                            }).catch(console.error);
+                            setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, isViewed: true } : m)));
+                            setLightboxMedia({
+                              type: msg.attachmentType === 'VIDEO' ? 'VIDEO' : 'IMAGE',
+                              url: msg.attachmentUrl,
+                              title: `1-View Media from @${partner.username}`,
+                              subtitle: formatMessageTime(msg.createdAt),
+                              caption: msg.text
+                            });
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '9px 14px',
+                            background: 'rgba(245, 158, 11, 0.2)',
+                            border: '1px solid var(--color-accent-amber)',
+                            borderRadius: '12px',
+                            cursor: 'pointer',
+                            color: 'var(--color-accent-amber)',
+                            fontSize: '13px'
+                          }}
+                        >
+                          <Eye size={18} />
+                          <span style={{ fontWeight: 700 }}>1 Photo (Tap to view once)</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                          <Eye size={16} color="var(--color-accent-amber)" />
+                          <span>View-once {msg.isViewed ? '(Opened by recipient)' : '(Sent)'}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {/* Regular Image Card */}
+                  {!msg.isViewOnce && isMedia && (
                     <div
                       className="horizon-media-card"
                       style={{ marginBottom: '6px', cursor: (isDownloaded || msg.attachmentUrl) ? 'pointer' : 'default' }}
@@ -567,35 +742,10 @@ export default function HorizonChatView({
                     >
                       <div className="horizon-blur-container">
                         <img
-                          src={isDownloaded ? msg.attachmentUrl : msg.thumbnailBlur}
-                          alt="Attachment micro-preview"
-                          className={`horizon-blur-img ${isDownloaded ? 'revealed' : ''}`}
+                          src={isDownloaded || msg.attachmentUrl ? msg.attachmentUrl : msg.thumbnailBlur}
+                          alt="Attachment preview"
+                          className="horizon-blur-img revealed"
                         />
-
-                        {/* Scrim with tap-to-download */}
-                        {!isDownloaded && (
-                          <div
-                            className="horizon-download-scrim"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!isDownloading) handleDownloadMedia(msg.id);
-                            }}
-                            title="Tap to download media"
-                          >
-                            {isDownloading ? (
-                              <Loader2 size={24} color="var(--color-accent-amber)" style={{ animation: 'spin 1s linear infinite' }} />
-                            ) : (
-                              <>
-                                <div className="horizon-download-glyph">
-                                  <Download size={18} />
-                                </div>
-                                <span className="horizon-file-size">
-                                  {formatFileSize(msg.fileSizeBytes)}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -741,45 +891,198 @@ export default function HorizonChatView({
         )}
       </div>
 
+      {/* Hidden File Pickers for Dedicated Categories */}
+      <input
+        type="file"
+        ref={imageInputRef}
+        onChange={(e) => handleFileChange(e, 'image', 'IMAGE')}
+        accept="image/*"
+        style={{ display: 'none' }}
+      />
+      <input
+        type="file"
+        ref={videoInputRef}
+        onChange={(e) => handleFileChange(e, 'video', 'VIDEO')}
+        accept="video/*"
+        style={{ display: 'none' }}
+      />
+      <input
+        type="file"
+        ref={audioInputRef}
+        onChange={(e) => handleFileChange(e, 'voice', 'AUDIO')}
+        accept="audio/*"
+        style={{ display: 'none' }}
+      />
+      <input
+        type="file"
+        ref={docInputRef}
+        onChange={(e) => handleFileChange(e, 'others', 'DOCUMENT')}
+        accept="application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+        style={{ display: 'none' }}
+      />
+
+      {/* Attachment Popover Menu */}
+      {showAttachMenu && (
+        <div
+          style={{
+            padding: '12px 16px',
+            backgroundColor: 'var(--color-surface-elevated)',
+            borderTop: '1px solid rgba(245, 158, 11, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-around',
+            gap: '8px',
+            animation: 'fadeIn 0.2s ease'
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#F8FAFC', cursor: 'pointer' }}
+          >
+            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', border: '1px solid #3B82F6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60A5FA' }}>
+              <ImageIcon size={20} />
+            </div>
+            <span style={{ fontSize: '11px', fontWeight: 600 }}>Photos</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => videoInputRef.current?.click()}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#F8FAFC', cursor: 'pointer' }}
+          >
+            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#F87171' }}>
+              <Film size={20} />
+            </div>
+            <span style={{ fontSize: '11px', fontWeight: 600 }}>Videos</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => audioInputRef.current?.click()}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#F8FAFC', cursor: 'pointer' }}
+          >
+            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34D399' }}>
+              <Mic size={20} />
+            </div>
+            <span style={{ fontSize: '11px', fontWeight: 600 }}>Audio</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => docInputRef.current?.click()}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#F8FAFC', cursor: 'pointer' }}
+          >
+            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.2)', border: '1px solid #A855F7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C084FC' }}>
+              <FileText size={20} />
+            </div>
+            <span style={{ fontSize: '11px', fontWeight: 600 }}>Document</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsViewOnceSelected(!isViewOnceSelected)}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: isViewOnceSelected ? 'var(--color-accent-amber)' : '#94A3B8', cursor: 'pointer' }}
+          >
+            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: isViewOnceSelected ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255,255,255,0.06)', border: `1px solid ${isViewOnceSelected ? 'var(--color-accent-amber)' : 'rgba(255,255,255,0.1)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: isViewOnceSelected ? 'var(--color-accent-amber)' : '#94A3B8' }}>
+              <Eye size={20} />
+            </div>
+            <span style={{ fontSize: '11px', fontWeight: 600 }}>{isViewOnceSelected ? '1-View: ON' : '1-View: OFF'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Horizontal Input Dock (activity_chat.xml) */}
       <form onSubmit={handleSendMessage} className="horizon-input-dock">
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.txt"
-          style={{ display: 'none' }}
-        />
+        {isRecordingVoice ? (
+          /* Live Voice Recording UI */
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#EF4444' }}>
+              <Radio size={18} style={{ animation: 'pulse 1s infinite' }} />
+              <span style={{ fontWeight: 700, fontSize: '14px', fontFamily: 'monospace' }}>
+                {formatRecordingTime(recordingDuration)}
+              </span>
+            </div>
 
-        <button
-          type="button"
-          onClick={handleAttachClick}
-          className="horizon-dock-clip"
-          title="Attach Image"
-          id="btnAttachMedia"
-        >
-          <Paperclip size={20} />
-        </button>
+            <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+              Recording voice note...
+            </span>
 
-        <input
-          id="etMessageInput"
-          type="text"
-          className="horizon-input-box"
-          placeholder="Message..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          autoComplete="off"
-        />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={cancelVoiceRecording}
+                style={{ background: 'none', border: 'none', color: '#EF4444', padding: '6px', cursor: 'pointer' }}
+                title="Cancel Recording"
+              >
+                <Trash2 size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={stopVoiceRecording}
+                className="horizon-send-fab"
+                style={{ width: '36px', height: '36px' }}
+                title="Send Voice Note"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Standard Input Bar */
+          <>
+            <button
+              type="button"
+              onClick={() => setShowAttachMenu(!showAttachMenu)}
+              className="horizon-dock-clip"
+              style={{ color: showAttachMenu || isViewOnceSelected ? 'var(--color-accent-amber)' : undefined }}
+              title="Attach Media (Cloudflare R2)"
+              id="btnAttachMedia"
+            >
+              <Paperclip size={20} />
+            </button>
 
-        <button
-          type="submit"
-          disabled={!inputText.trim()}
-          className="horizon-send-fab"
-          id="btnSendMessage"
-          title="Send"
-        >
-          <Send size={18} style={{ marginLeft: '2px' }} />
-        </button>
+            {isViewOnceSelected && (
+              <span style={{ padding: '2px 6px', backgroundColor: 'rgba(245, 158, 11, 0.2)', border: '1px solid var(--color-accent-amber)', borderRadius: '6px', fontSize: '11px', color: 'var(--color-accent-amber)', fontWeight: 700, flexShrink: 0 }}>
+                1-View
+              </span>
+            )}
+
+            <input
+              id="etMessageInput"
+              type="text"
+              className="horizon-input-box"
+              placeholder={uploadingMedia ? "Uploading to Cloudflare R2..." : "Message..."}
+              disabled={uploadingMedia}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              autoComplete="off"
+            />
+
+            {inputText.trim() ? (
+              <button
+                type="submit"
+                disabled={uploadingMedia}
+                className="horizon-send-fab"
+                id="btnSendMessage"
+                title="Send Message"
+              >
+                <Send size={18} style={{ marginLeft: '2px' }} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startVoiceRecording}
+                className="horizon-dock-clip"
+                style={{ color: 'var(--color-accent-amber)' }}
+                title="Record Voice Note"
+                id="btnRecordVoice"
+              >
+                <Mic size={20} />
+              </button>
+            )}
+          </>
+        )}
       </form>
 
       {/* Full-Screen Interactive Player & Photo Viewer Modal */}
@@ -1017,10 +1320,16 @@ export default function HorizonChatView({
                     fontSize: '28px',
                     fontWeight: 700,
                     color: '#fff',
-                    marginBottom: '12px'
+                    marginBottom: '12px',
+                    overflow: 'hidden',
+                    border: '2px solid var(--color-accent-amber)'
                   }}
                 >
-                  {(partner.username || 'User').slice(0, 2).toUpperCase()}
+                  {partner.avatarUrl || partner.avatar_url ? (
+                    <img src={partner.avatarUrl || partner.avatar_url} alt={partner.username} className="horizon-avatar-img" />
+                  ) : (
+                    (partner.username || 'User').slice(0, 2).toUpperCase()
+                  )}
                 </div>
                 <div style={{ fontSize: '18px', fontWeight: 700, color: '#F8FAFC' }}>
                   @{partner.username}

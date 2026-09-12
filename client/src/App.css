@@ -1,4 +1,6 @@
-/* Horizon Chat: Sunset Glow & Twilight Ocean Styles */
+/* ======================================================== */
+/* Horizon Chat: Muted High-Contrast Professional Theme    */
+/* ======================================================== */
 
 .horizon-wrapper {
   width: 100%;
@@ -9,6 +11,7 @@
   justify-content: center;
   position: relative;
   overflow: hidden;
+  background-color: var(--color-bg-base);
 }
 
 .horizon-phone-chassis {
@@ -21,15 +24,15 @@
   flex-direction: column;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(245, 158, 11, 0.15);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 @media (min-width: 500px) {
   .horizon-phone-chassis {
     height: 94vh;
     border-radius: 36px;
-    border: 8px solid #162238;
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(245, 158, 11, 0.25);
+    border: 8px solid var(--color-surface);
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.9), 0 0 0 2px rgba(78, 117, 248, 0.25);
   }
 }
 
@@ -55,7 +58,7 @@
   color: var(--color-text-muted);
   user-select: none;
   z-index: 50;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .horizon-status-left {
@@ -73,9 +76,9 @@
 
 /* Cold Start Non-blocking Top Banner */
 .horizon-cold-banner {
-  background-color: rgba(245, 158, 11, 0.15);
-  border-bottom: 1px solid rgba(245, 158, 11, 0.4);
-  color: #FDE68A;
+  background-color: rgba(78, 117, 248, 0.15);
+  border-bottom: 1px solid rgba(78, 117, 248, 0.4);
+  color: #93C5FD;
   padding: 6px 14px;
   font-size: 11px;
   display: flex;
@@ -90,8 +93,8 @@
   position: absolute;
   top: 16px;
   right: 16px;
-  background-color: rgba(22, 34, 56, 0.85);
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background-color: rgba(30, 31, 36, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: var(--color-text-muted);
   font-size: 11px;
   font-weight: 600;
@@ -103,11 +106,12 @@
   align-items: center;
   gap: 6px;
   backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
 }
 
 .horizon-mode-toggle:hover {
   color: var(--color-text-primary);
-  border-color: var(--color-accent-amber);
+  border-color: var(--color-accent-blue);
 }
 
 /* ======================================================== */
@@ -137,12 +141,12 @@
   width: 68px;
   height: 68px;
   border-radius: 50%;
-  background: radial-gradient(circle, #F59E0B 0%, #EA580C 100%);
+  background: radial-gradient(circle, #4E75F8 0%, #263352 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0E1626;
-  box-shadow: 0 0 30px rgba(245, 158, 11, 0.45);
+  color: #F4F4F6;
+  box-shadow: 0 0 30px rgba(78, 117, 248, 0.4);
 }
 
 .horizon-auth-title {
@@ -169,7 +173,7 @@
   width: 100%;
   height: 52px;
   background-color: var(--color-surface);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 0 16px;
   color: var(--color-text-primary);
@@ -179,8 +183,8 @@
 }
 
 .horizon-input-field:focus {
-  border-color: var(--color-accent-amber);
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+  border-color: var(--color-accent-blue);
+  box-shadow: 0 0 0 2px rgba(78, 117, 248, 0.2);
 }
 
 .horizon-input-field::placeholder {
@@ -190,8 +194,8 @@
 .horizon-btn-primary {
   width: 100%;
   height: 54px;
-  background-color: var(--color-accent-amber);
-  color: #0E1626;
+  background-color: var(--color-accent-blue);
+  color: #FFFFFF;
   font-weight: 700;
   font-size: 15px;
   border: none;
@@ -202,18 +206,18 @@
   justify-content: center;
   gap: 8px;
   transition: background-color 0.2s, transform 0.1s;
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 16px rgba(78, 117, 248, 0.35);
 }
 
 .horizon-btn-primary:hover {
-  background-color: #D97706;
+  background-color: #3B63E0;
   transform: translateY(-1px);
 }
 
 .horizon-toggle-link {
   background: none;
   border: none;
-  color: var(--color-accent-amber);
+  color: var(--color-accent-blue);
   font-size: 14px;
   cursor: pointer;
   padding: 12px;
@@ -222,8 +226,8 @@
 }
 
 .horizon-error-banner {
-  background-color: rgba(239, 68, 68, 0.15);
-  border: 1px solid #EF4444;
+  background-color: rgba(217, 83, 79, 0.15);
+  border: 1px solid var(--color-destructive);
   color: #FCA5A5;
   padding: 8px 12px;
   border-radius: 8px;
@@ -251,11 +255,11 @@
   justify-content: space-between;
   padding: 0 16px;
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .horizon-toolbar-title {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   color: var(--color-text-primary);
 }
@@ -280,7 +284,7 @@
   padding: 14px 16px;
   gap: 14px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   transition: background-color 0.15s ease;
 }
 
@@ -292,14 +296,14 @@
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #1E293B, #24334D);
-  border: 2px solid rgba(245, 158, 11, 0.3);
+  background: linear-gradient(135deg, #1E1F24, #2A2B32);
+  border: 2px solid rgba(78, 117, 248, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--color-text-primary);
   font-weight: 700;
-  font-size: 18px;
+  font-size: 17px;
   flex-shrink: 0;
   position: relative;
 }
@@ -312,8 +316,17 @@
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background-color: var(--color-accent-amber);
+  background-color: var(--color-accent-blue);
   border: 2px solid var(--color-bg-base);
+}
+
+.horizon-cell-avatar img,
+.horizon-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
 }
 
 .horizon-cell-content {
@@ -331,7 +344,7 @@
 }
 
 .horizon-cell-username {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-text-primary);
 }
@@ -364,10 +377,10 @@
   width: 56px;
   height: 56px;
   border-radius: 16px;
-  background-color: var(--color-accent-amber);
-  color: #0E1626;
+  background-color: var(--color-accent-blue);
+  color: #FFFFFF;
   border: none;
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4);
+  box-shadow: 0 4px 16px rgba(78, 117, 248, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -378,7 +391,7 @@
 
 .horizon-fab:hover {
   transform: scale(1.06);
-  background-color: #D97706;
+  background-color: #3B63E0;
 }
 
 /* ======================================================== */
@@ -404,7 +417,7 @@
   padding: 0 10px;
   flex-shrink: 0;
   z-index: 20;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .horizon-partner-info {
@@ -419,7 +432,7 @@
 }
 
 .horizon-presence-badge.online {
-  color: var(--color-accent-amber);
+  color: var(--color-accent-blue);
 }
 
 .horizon-presence-badge.offline {
@@ -450,31 +463,34 @@
   align-items: flex-start;
 }
 
-/* Asymmetric Bubbles (PRD Section 5 Constraints: max-width 260px) */
+/* Asymmetric High-Contrast Bubbles */
 .horizon-bubble {
-  max-width: 260px;
+  max-width: 270px;
   padding: 8px 12px 6px 12px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   word-break: break-word;
   line-height: 1.4;
   position: relative;
 }
 
 .horizon-bubble.outgoing {
-  background-color: var(--color-bubble-sent); /* #EA580C */
-  color: var(--color-text-primary);
-  border-radius: 14px 14px 2px 14px; /* Bottom-right radius 2dp */
+  background-color: var(--color-bubble-sent); /* #263352 */
+  color: var(--color-text-primary); /* #F4F4F6 */
+  border-radius: 14px 14px 2px 14px;
+  border: 1px solid rgba(78, 117, 248, 0.15);
 }
 
 .horizon-bubble.incoming {
-  background-color: var(--color-bubble-received); /* #24334D */
-  color: var(--color-text-primary);
-  border-radius: 14px 14px 14px 2px; /* Bottom-left radius 2dp */
+  background-color: var(--color-bubble-received); /* #2A2B32 */
+  color: var(--color-text-primary); /* #F4F4F6 */
+  border-radius: 14px 14px 14px 2px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .horizon-bubble-text {
   font-size: 15px;
   white-space: pre-wrap;
+  color: var(--color-text-primary);
 }
 
 .horizon-bubble-meta {
@@ -487,11 +503,11 @@
 }
 
 .horizon-bubble.outgoing .horizon-bubble-meta {
-  color: #FED7AA;
+  color: var(--color-text-muted); /* #A0A3BD */
 }
 
 .horizon-bubble.incoming .horizon-bubble-meta {
-  color: var(--color-text-muted);
+  color: var(--color-text-muted); /* #A0A3BD */
 }
 
 /* Tick Colors */
@@ -501,11 +517,11 @@
 }
 
 .horizon-tick.read {
-  color: var(--color-ticks-read); /* #FDE68A */
+  color: var(--color-ticks-read); /* #4E75F8 */
 }
 
 .horizon-tick.delivered, .horizon-tick.sent {
-  color: var(--color-ticks-sent); /* #CBD5E1 */
+  color: var(--color-ticks-sent); /* #A0A3BD */
 }
 
 /* 4. Media & Micro-Blur Thumbnail Card (item_chat_sent_media.xml) */
@@ -523,7 +539,7 @@
   height: 180px;
   position: relative;
   overflow: hidden;
-  background-color: #121B2B;
+  background-color: #1A1C23;
 }
 
 .horizon-blur-img {
@@ -554,14 +570,14 @@
 }
 
 .horizon-download-scrim:hover {
-  background-color: rgba(14, 22, 38, 0.8);
+  background-color: rgba(18, 18, 20, 0.85);
 }
 
 .horizon-download-glyph {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -576,13 +592,13 @@
 
 /* Horizontal Input Dock (activity_chat.xml) */
 .horizon-input-dock {
-  background-color: var(--color-surface);
+  background-color: var(--color-surface); /* #1E1F24 */
   padding: 8px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .horizon-dock-clip {
@@ -598,7 +614,7 @@
 }
 
 .horizon-dock-clip:hover {
-  color: var(--color-accent-amber);
+  color: var(--color-accent-blue);
 }
 
 .horizon-input-box {
@@ -619,8 +635,8 @@
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  background-color: var(--color-accent-amber);
-  color: #0E1626;
+  background-color: var(--color-accent-blue); /* #4E75F8 */
+  color: #FFFFFF;
   border: none;
   display: flex;
   align-items: center;
@@ -628,11 +644,12 @@
   cursor: pointer;
   transition: transform 0.1s ease;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 2px 10px rgba(78, 117, 248, 0.35);
 }
 
 .horizon-send-fab:hover {
   transform: scale(1.05);
+  background-color: #3B63E0;
 }
 
 /* Soft Navigation Gesture Bar */
@@ -647,7 +664,7 @@
 .horizon-nav-pill {
   width: 72px;
   height: 4px;
-  background-color: rgba(255, 255, 255, 0.25);
+  background-color: rgba(255, 255, 255, 0.2);
   border-radius: 999px;
 }
 
@@ -666,7 +683,7 @@
   border-radius: 50%;
   border: none;
   background-color: var(--color-surface-elevated);
-  color: var(--color-accent-amber);
+  color: var(--color-accent-blue);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -676,8 +693,8 @@
 }
 
 .horizon-bubble.outgoing .horizon-voice-play-btn {
-  background-color: rgba(0, 0, 0, 0.25);
-  color: #fff;
+  background-color: rgba(0, 0, 0, 0.3);
+  color: #FFFFFF;
 }
 
 .horizon-voice-play-btn:hover {
@@ -687,7 +704,7 @@
 .horizon-voice-track {
   flex: 1;
   height: 4px;
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.15);
   border-radius: 2px;
   overflow: hidden;
   position: relative;
@@ -695,13 +712,13 @@
 
 .horizon-voice-progress {
   height: 100%;
-  background-color: var(--color-accent-amber);
+  background-color: var(--color-accent-blue);
   border-radius: 2px;
   transition: width 0.1s linear;
 }
 
 .horizon-bubble.outgoing .horizon-voice-progress {
-  background-color: #ffffff;
+  background-color: #FFFFFF;
 }
 
 .horizon-voice-duration {
@@ -712,11 +729,49 @@
 }
 
 .horizon-voice-mic {
-  opacity: 0.7;
-  color: var(--color-accent-amber);
+  opacity: 0.75;
+  color: var(--color-accent-blue);
   flex-shrink: 0;
 }
 
 .horizon-bubble.outgoing .horizon-voice-mic {
-  color: #ffffff;
+  color: #FFFFFF;
+}
+
+/* Modals and Overlays */
+.horizon-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background-color: var(--color-overlay-blur);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.horizon-modal-card {
+  width: 100%;
+  background-color: var(--color-surface);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+
+.horizon-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.horizon-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
 }

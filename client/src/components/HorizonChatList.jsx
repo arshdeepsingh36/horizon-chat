@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Search,
   MoreVertical,
@@ -9,8 +9,13 @@ import {
   X,
   User,
   Loader2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Camera,
+  Upload,
+  Settings,
+  Edit3
 } from 'lucide-react';
+import { uploadToR2 } from '../utils/r2Upload';
 
 export default function HorizonChatList({
   user,
@@ -18,16 +23,111 @@ export default function HorizonChatList({
   onSelectChat,
   onLogout,
   apiBaseUrl,
-  token
+  token,
+  onUpdateUser
 }) {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [searchUsername, setSearchUsername] = useState('');
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupError, setLookupError] = useState('');
   const [lookingUp, setLookingUp] = useState(false);
+
+  // Profile editing state
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+  const [displayNameInput, setDisplayNameInput] = useState(user.displayName || user.username || '');
+  const [bioStatusInput, setBioStatusInput] = useState(user.bioStatus || 'Hey there! I am using Horizon Chat.');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleAvatarFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Please select a valid image file (JPEG, PNG, WEBP).');
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setAvatarError('');
+
+    try {
+      // Direct binary PUT upload to Cloudflare R2
+      const { publicUrl } = await uploadToR2({
+        file,
+        uploadType: 'pfp',
+        mediaType: 'image',
+        apiBaseUrl,
+        token
+      });
+
+      // Update backend user profile record
+      const res = await fetch(`${apiBaseUrl}/api/users/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ avatarUrl: publicUrl })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to update profile avatar');
+      }
+
+      const data = await res.json();
+      if (onUpdateUser && data.user) {
+        onUpdateUser(data.user);
+      }
+    } catch (err) {
+      console.error('[AVATAR UPLOAD ERROR]', err);
+      setAvatarError(err.message || 'Avatar upload failed.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleSaveProfileDetails = async (e) => {
+    e?.preventDefault();
+    setSavingProfile(true);
+    setAvatarError('');
+
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/users/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          displayName: displayNameInput.trim(),
+          bioStatus: bioStatusInput.trim()
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to save profile');
+      }
+
+      const data = await res.json();
+      if (onUpdateUser && data.user) {
+        onUpdateUser(data.user);
+      }
+      setShowProfileModal(false);
+    } catch (err) {
+      console.error('[SAVE PROFILE ERROR]', err);
+      setAvatarError(err.message || 'Failed to save profile.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   // Filter existing chats locally
   const filteredChats = chats.filter((c) => {
@@ -96,16 +196,44 @@ export default function HorizonChatList({
       {/* Top App Bar (Dusk Navy #162238) */}
       <div className="horizon-toolbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div
+            onClick={() => setShowProfileModal(true)}
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: 'var(--color-surface)',
+              border: '1.5px solid var(--color-accent-amber)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              overflow: 'hidden',
+              flexShrink: 0
+            }}
+            title="Open Profile Settings"
+          >
+            {user.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.username} className="horizon-avatar-img" />
+            ) : (
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                {(user.displayName || user.username || 'U').slice(0, 2).toUpperCase()}
+              </span>
+            )}
+          </div>
           <span className="horizon-toolbar-title">Horizon Chat</span>
           <span
+            onClick={() => setShowProfileModal(true)}
             style={{
               fontSize: '11px',
               padding: '2px 8px',
               backgroundColor: 'rgba(245, 158, 11, 0.15)',
               color: 'var(--color-accent-amber)',
               borderRadius: '12px',
-              fontWeight: 600
+              fontWeight: 600,
+              cursor: 'pointer'
             }}
+            title="Edit Profile"
           >
             @{user.username}
           </span>
@@ -157,6 +285,30 @@ export default function HorizonChatList({
                   Signed in as<br />
                   <strong style={{ color: 'var(--color-text-primary)' }}>@{user.username}</strong>
                 </div>
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    setShowProfileModal(true);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 16px',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-surface)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                >
+                  <User size={15} color="var(--color-accent-amber)" />
+                  <span>Profile & Avatar</span>
+                </button>
                 <button
                   onClick={() => {
                     setShowMenu(false);
@@ -307,7 +459,11 @@ export default function HorizonChatList({
               >
                 {/* 48x48 Circular Avatar with Online Amber Dot */}
                 <div className={`horizon-cell-avatar ${isOnline ? 'online' : ''}`}>
-                  {(partnerName || 'U').slice(0, 2).toUpperCase()}
+                  {chat.partnerAvatarUrl ? (
+                    <img src={chat.partnerAvatarUrl} alt={partnerName} className="horizon-avatar-img" />
+                  ) : (
+                    (partnerName || 'U').slice(0, 2).toUpperCase()
+                  )}
                 </div>
 
                 {/* Content */}
@@ -464,7 +620,11 @@ export default function HorizonChatList({
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div className={`horizon-cell-avatar ${lookupResult.online ? 'online' : ''}`} style={{ width: '40px', height: '40px', fontSize: '15px' }}>
-                      {lookupResult.username.slice(0, 2).toUpperCase()}
+                      {lookupResult.avatar_url || lookupResult.avatarUrl ? (
+                        <img src={lookupResult.avatar_url || lookupResult.avatarUrl} alt={lookupResult.username} className="horizon-avatar-img" />
+                      ) : (
+                        lookupResult.username.slice(0, 2).toUpperCase()
+                      )}
                     </div>
                     <div>
                       <div style={{ fontWeight: 700, color: 'var(--color-text-primary)', fontSize: '15px' }}>
@@ -511,6 +671,197 @@ export default function HorizonChatList({
                 )}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Hidden File Input for Avatar Upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleAvatarFileSelect}
+        accept="image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
+      />
+
+      {/* User Profile & Avatar Settings Modal */}
+      {showProfileModal && (
+        <div className="horizon-modal-overlay">
+          <div className="horizon-modal-card" style={{ maxWidth: '380px' }}>
+            <div className="horizon-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <User size={18} color="var(--color-accent-amber)" />
+                <h3 className="horizon-modal-title">My Profile & Avatar</h3>
+              </div>
+              <button
+                className="horizon-dock-clip"
+                onClick={() => setShowProfileModal(false)}
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              {/* Avatar Preview with R2 Upload Button */}
+              <div style={{ position: 'relative' }}>
+                <div
+                  className="horizon-cell-avatar"
+                  style={{
+                    width: '96px',
+                    height: '96px',
+                    fontSize: '32px',
+                    border: '3px solid var(--color-accent-amber)',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+                  }}
+                >
+                  {user.avatarUrl ? (
+                    <img src={user.avatarUrl} alt={user.username} className="horizon-avatar-img" />
+                  ) : (
+                    (displayNameInput || user.username || 'U').slice(0, 2).toUpperCase()
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                  style={{
+                    position: 'absolute',
+                    bottom: '0',
+                    right: '0',
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--color-accent-amber)',
+                    border: '2px solid var(--color-bg-base)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: '#0E1626'
+                  }}
+                  title="Upload New Avatar (Cloudflare R2)"
+                >
+                  {uploadingAvatar ? (
+                    <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <Camera size={16} />
+                  )}
+                </button>
+              </div>
+
+              {uploadingAvatar && (
+                <div style={{ fontSize: '12px', color: 'var(--color-accent-amber)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>Uploading directly to Cloudflare R2...</span>
+                </div>
+              )}
+
+              {avatarError && (
+                <div style={{ fontSize: '12px', color: '#EF4444', textAlign: 'center' }}>
+                  {avatarError}
+                </div>
+              )}
+
+              {/* Form Details */}
+              <form onSubmit={handleSaveProfileDetails} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={`@${user.username}`}
+                    disabled
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      backgroundColor: 'rgba(255,255,255,0.03)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '8px',
+                      color: 'var(--color-text-muted)',
+                      fontSize: '13px',
+                      marginTop: '4px'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Display Name
+                  </label>
+                  <input
+                    type="text"
+                    value={displayNameInput}
+                    onChange={(e) => setDisplayNameInput(e.target.value)}
+                    placeholder="Enter display name"
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      backgroundColor: 'var(--color-surface)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: 'var(--color-text-primary)',
+                      fontSize: '13px',
+                      marginTop: '4px'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                    Bio / Status
+                  </label>
+                  <input
+                    type="text"
+                    value={bioStatusInput}
+                    onChange={(e) => setBioStatusInput(e.target.value)}
+                    placeholder="Hey there! I am using Horizon Chat."
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      backgroundColor: 'var(--color-surface)',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: 'var(--color-text-primary)',
+                      fontSize: '13px',
+                      marginTop: '4px'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowProfileModal(false)}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      backgroundColor: 'transparent',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '8px',
+                      color: 'var(--color-text-muted)',
+                      fontSize: '13px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingProfile}
+                    className="horizon-btn-primary"
+                    style={{ flex: 1, padding: '10px', fontSize: '13px' }}
+                  >
+                    {savingProfile ? (
+                      <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                    ) : (
+                      'Save Details'
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

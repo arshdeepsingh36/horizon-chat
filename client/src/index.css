@@ -1,17 +1,19 @@
 :root {
-  /* Horizon Chat: Sunset Glow & Twilight Ocean Theme Tokens */
-  --color-bg-base: #0E1626;
-  --color-surface: #162238;
-  --color-surface-elevated: #1E293B;
-  --color-bubble-sent: #EA580C;
-  --color-bubble-received: #24334D;
-  --color-accent-amber: #F59E0B;
-  --color-accent-glow: #FBBF24;
-  --color-text-primary: #FFFBEB;
-  --color-text-muted: #94A3B8;
-  --color-ticks-sent: #CBD5E1;
-  --color-ticks-read: #FDE68A;
-  --color-overlay-blur: rgba(14, 22, 38, 0.65);
+  /* Horizon Chat: Muted High-Contrast Theme Tokens (Phase 3) */
+  --color-bg-base: #121214;
+  --color-surface: #1E1F24;
+  --color-surface-elevated: #2A2B32;
+  --color-bubble-sent: #263352;
+  --color-bubble-received: #2A2B32;
+  --color-accent-blue: #4E75F8;
+  --color-accent-amber: #4E75F8; /* Mapped to #4E75F8 for seamless theme consistency */
+  --color-accent-primary: #4E75F8;
+  --color-text-primary: #F4F4F6;
+  --color-text-muted: #A0A3BD;
+  --color-ticks-sent: #A0A3BD;
+  --color-ticks-read: #4E75F8;
+  --color-destructive: #D9534F;
+  --color-overlay-blur: rgba(18, 18, 20, 0.75);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -26,7 +28,7 @@
 html, body {
   width: 100%;
   height: 100%;
-  background-color: #070B14;
+  background-color: #121214;
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -40,7 +42,7 @@ html, body {
   display: flex;
   justify-content: center;
   align-items: center;
-  background-color: #070B14;
+  background-color: #121214;
 }
 
 /* Animations */
@@ -51,13 +53,13 @@ html, body {
 
 @keyframes spin {
   from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  to { rotate: 360deg; }
 }
 
-@keyframes pulseAmber {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+@keyframes pulseAccent {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(78, 117, 248, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(78, 117, 248, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(78, 117, 248, 0); }
 }
 
 /* Scrollbars */
@@ -68,9 +70,9 @@ html, body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.25);
+  background: rgba(160, 163, 189, 0.25);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.4);
+  background: rgba(78, 117, 248, 0.4);
 }
