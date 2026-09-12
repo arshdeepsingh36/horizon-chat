@@ -45,7 +45,7 @@ jobs:
       - name: Prepare Distribution Files
         run: |
           mkdir -p /tmp/dist
-          find . -name "*debug*.apk" -exec cp {} /tmp/dist/app-debug.apk \;
+          cp android/app/build/outputs/apk/debug/*.apk /tmp/dist/app-debug.apk
           cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.1.0.apk
           ls -la /tmp/dist/
 
