@@ -40,7 +40,7 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace --info
 
       - name: Prepare Distribution Files
         run: |
