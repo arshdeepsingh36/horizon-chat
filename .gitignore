@@ -72,6 +72,12 @@ test_*.js
 inspect_*.js
 feedback_loop.*
 PHASE_*.md
+TASK_TRACKER.md
+PROGRESS_TRACKER.md
+ACTIVITY_LOG.md
+LOCAL_LOG.md
+*.local_log
+*.tracker.md
 
 
 
