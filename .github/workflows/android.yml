@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir -p /tmp/dist
           find . -name "*debug*.apk" -exec cp {} /tmp/dist/app-debug.apk \;
-          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk
+          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.1.apk
           ls -la /tmp/dist/
 
       - name: Upload APK Artifact
@@ -58,11 +58,11 @@ jobs:
 
       - name: Publish GitHub Release Asset
         run: |
-          gh release create v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk \
-            --title "Horizon Chat v2.0 Latest Debug Build" \
-            --notes "Horizon Chat build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." \
+          gh release create v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.1.apk \
+            --title "Horizon Chat v2.0.1 Latest Debug Build" \
+            --notes "Horizon Chat v2.0.1 complete build with Video Messaging, Native Document Viewer, Real-Time Presence, and User Profile." \
             --clobber || \
-          gh release upload v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.0.apk --clobber
+          gh release upload v2.0-latest /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v2.0.1.apk --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

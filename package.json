@@ -1,6 +1,6 @@
 {
   "name": "horizon-chat",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Horizon Chat — Native Android & Cloud-Synced Real-Time Messenger",
   "scripts": {
     "start": "concurrently \"npm run server\" \"npm run client\"",

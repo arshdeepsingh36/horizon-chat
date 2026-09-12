@@ -17,11 +17,11 @@
 
 ---
 
-## 📱 Download Android APK (Latest v2.0.0)
+## 📱 Download Android APK (Latest v2.0.1)
 
 Directly install Horizon Chat onto your Android phone:
 
-* **[Download horizon-chat-v2.0.0.apk (GitHub Release)](https://github.com/arshdeepsingh36/horizon-chat/releases/download/v2.0-latest/horizon-chat-v2.0.0.apk)**
+* **[Download horizon-chat-v2.0.1.apk (GitHub Release)](https://github.com/arshdeepsingh36/horizon-chat/releases/download/v2.0-latest/horizon-chat-v2.0.1.apk)**
 * **[Download app-debug.apk (GitHub Release)](https://github.com/arshdeepsingh36/horizon-chat/releases/download/v2.0-latest/app-debug.apk)**
 * **[GitHub Releases Page (v2.0-latest)](https://github.com/arshdeepsingh36/horizon-chat/releases/tag/v2.0-latest)**
 
