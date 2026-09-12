@@ -43,17 +43,7 @@ jobs:
       - name: Build Debug APK
         working-directory: ./android
         run: |
-          set -o pipefail
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build_error.log
-
-      - name: Push Error Log to Git
-        if: failure()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f build_error.log || true
-          git commit -m "ci: capture build error log [skip ci]" --allow-empty
-          git push origin main
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Prepare Distribution Files
         run: |
