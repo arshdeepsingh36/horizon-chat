@@ -50,7 +50,8 @@ Thumbs.db
 .idea/
 *.swp
 *.apk
-apk/
+!apk/*.apk
+!apk/
 release_apk/
 apk_output/
 *.ico
