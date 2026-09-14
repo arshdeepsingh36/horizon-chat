@@ -1522,10 +1522,13 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
     override fun onNewMessage(message: ChatMessage) {
         runOnUiThread {
             if (message.senderId == targetUserId || message.recipientId == targetUserId) {
-                val existingIdx = cachedMessageList.indexOfFirst { it.id == message.id || (it.localClientId != null && it.localClientId == message.localClientId) }
+                val existingIdx = cachedMessageList.indexOfFirst {
+                    it.id == message.id || (message.localClientId != null && it.localClientId == message.localClientId)
+                }
                 if (existingIdx != -1) {
+                    val oldTempId = cachedMessageList[existingIdx].id
                     cachedMessageList[existingIdx] = message
-                    adapter.updateOptimisticMessage(cachedMessageList[existingIdx].id, message)
+                    adapter.updateOptimisticMessage(oldTempId, message)
                 } else {
                     cachedMessageList.add(message)
                     adapter.appendMessage(message)

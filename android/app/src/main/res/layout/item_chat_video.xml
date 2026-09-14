@@ -53,7 +53,7 @@
                     android:layout_height="match_parent"
                     android:gravity="center"
                     android:orientation="vertical"
-                    android:background="#990E1626"
+                    android:background="#99121214"
                     android:visibility="gone">
 
                     <ProgressBar
@@ -90,10 +90,10 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="0:45"
-                        android:textColor="#FFFBEB"
+                        android:textColor="@color/text_primary"
                         android:textSize="11sp"
                         android:textStyle="bold"
-                        android:background="#990E1626"
+                        android:background="#99121214"
                         android:paddingHorizontal="6dp"
                         android:paddingVertical="2dp" />
 
@@ -102,10 +102,10 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="4.2 MB"
-                        android:textColor="#FED7AA"
+                        android:textColor="@color/text_secondary"
                         android:textSize="11sp"
                         android:layout_marginStart="6dp"
-                        android:background="#990E1626"
+                        android:background="#99121214"
                         android:paddingHorizontal="6dp"
                         android:paddingVertical="2dp" />
 
@@ -148,7 +148,7 @@
                     android:id="@+id/tvTimestamp"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="#FED7AA"
+                    android:textColor="@color/text_secondary"
                     android:textSize="11sp"
                     android:layout_marginStart="6dp" />
 

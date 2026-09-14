@@ -69,6 +69,7 @@ export async function initDb() {
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
       ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by_users TEXT DEFAULT '[]';
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP WITH TIME ZONE;
 
       CREATE TABLE IF NOT EXISTS user_blocks (
         id SERIAL PRIMARY KEY,
@@ -148,6 +149,7 @@ export async function initDb() {
             tryAdd("ALTER TABLE accounts ADD COLUMN last_seen DATETIME");
             tryAdd("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
             tryAdd("ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0");
+            tryAdd("ALTER TABLE messages ADD COLUMN read_at DATETIME");
             tryAdd("ALTER TABLE messages ADD COLUMN r2_key TEXT");
             tryAdd("ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '{}'");
             tryAdd("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0");
@@ -515,6 +517,8 @@ function formatMessage(r) {
     deleted_for_everyone: deletedForEveryone,
     deletedByUsers,
     deleted_by_users: deletedByUsers,
+    readAt: r.read_at ?? r.readAt ?? null,
+    read_at: r.read_at ?? r.readAt ?? null,
     createdAt,
     created_at: createdAt
   };
@@ -528,9 +532,10 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
+          AND (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
           AND id < $3
         ORDER BY id DESC
         LIMIT $4
@@ -538,9 +543,10 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
-        WHERE (sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1)
+        WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
+          AND (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
         ORDER BY id DESC
         LIMIT $3
       `;
@@ -556,9 +562,10 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
+          AND (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
           AND id < ?
         ORDER BY id DESC
         LIMIT ?
@@ -566,9 +573,10 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, targetUserId, currentUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
-        WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
+        WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
+          AND (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
         ORDER BY id DESC
         LIMIT ?
       `;
@@ -658,10 +666,19 @@ export async function markMediaViewed(messageId) {
 
 export async function updateMessageStatus(messageId, status) {
   if (isPg) {
-    await pgPool.query('UPDATE messages SET status = $1 WHERE id = $2', [status, messageId]);
+    if (status === 'READ') {
+      await pgPool.query("UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = $1", [messageId]);
+    } else {
+      await pgPool.query('UPDATE messages SET status = $1 WHERE id = $2', [status, messageId]);
+    }
   } else {
     return new Promise((resolve, reject) => {
-      sqliteDb.run('UPDATE messages SET status = ? WHERE id = ?', [status, messageId], (err) => {
+      const sql = status === 'READ'
+        ? "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, datetime('now')) WHERE id = ?"
+        : "UPDATE messages SET status = ? WHERE id = ?";
+      const params = [messageId];
+      if (status !== 'READ') params.unshift(status);
+      sqliteDb.run(sql, params, (err) => {
         if (err) return reject(err);
         resolve();
       });
@@ -673,9 +690,10 @@ export async function getUserConversations(currentUserId) {
   const sql = `
     SELECT 
       CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS partner_id,
-      id, sender_id, recipient_id, message_text, attachment_type, status, is_view_once, is_viewed, created_at
+      id, sender_id, recipient_id, message_text, attachment_type, status, is_view_once, is_viewed, read_at, created_at
     FROM messages
-    WHERE sender_id = $1 OR recipient_id = $2
+    WHERE (sender_id = $1 OR recipient_id = $2)
+      AND (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
     ORDER BY id DESC
   `;
 
@@ -684,9 +702,17 @@ export async function getUserConversations(currentUserId) {
     const res = await pgPool.query(sql, [currentUserId, currentUserId]);
     rows = res.rows;
   } else {
-    const sqliteSql = sql.replace(/\$1/g, '?').replace(/\$2/g, '?');
+    const sqliteSql = `
+      SELECT 
+        CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END AS partner_id,
+        id, sender_id, recipient_id, message_text, attachment_type, status, is_view_once, is_viewed, read_at, created_at
+      FROM messages
+      WHERE (sender_id = ? OR recipient_id = ?)
+        AND (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
+      ORDER BY id DESC
+    `;
     rows = await new Promise((resolve, reject) => {
-      sqliteDb.all(sqliteSql, [currentUserId, currentUserId], (err, resRows) => {
+      sqliteDb.all(sqliteSql, [currentUserId, currentUserId, currentUserId], (err, resRows) => {
         if (err) return reject(err);
         resolve(resRows || []);
       });
@@ -911,14 +937,14 @@ export async function pinMessage(messageId, isPinned = true) {
 export async function markConversationRead(currentUserId, partnerId) {
   if (isPg) {
     await pgPool.query(
-      "UPDATE messages SET status = 'READ' WHERE sender_id = $1 AND recipient_id = $2 AND status != 'READ'",
+      "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE sender_id = $1 AND recipient_id = $2 AND status != 'READ'",
       [partnerId, currentUserId]
     );
     return true;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.run(
-        "UPDATE messages SET status = 'READ' WHERE sender_id = ? AND recipient_id = ? AND status != 'READ'",
+        "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, datetime('now')) WHERE sender_id = ? AND recipient_id = ? AND status != 'READ'",
         [partnerId, currentUserId],
         (err) => {
           if (err) return reject(err);
@@ -926,6 +952,35 @@ export async function markConversationRead(currentUserId, partnerId) {
         }
       );
     });
+  }
+}
+
+export async function deleteExpiredSeenMessages() {
+  try {
+    if (isPg) {
+      const res = await pgPool.query(
+        "DELETE FROM messages WHERE status = 'READ' AND read_at IS NOT NULL AND read_at < NOW() - INTERVAL '24 hours'"
+      );
+      if (res && res.rowCount > 0) {
+        console.log(`[EPHEMERAL 24H CLEANUP] Deleted ${res.rowCount} seen messages older than 24 hours.`);
+      }
+      return res ? res.rowCount : 0;
+    } else if (sqliteDb) {
+      return new Promise((resolve) => {
+        sqliteDb.run(
+          "DELETE FROM messages WHERE status = 'READ' AND read_at IS NOT NULL AND read_at < datetime('now', '-24 hours')",
+          function (err) {
+            if (!err && this.changes > 0) {
+              console.log(`[EPHEMERAL 24H CLEANUP] Deleted ${this.changes} seen messages older than 24 hours.`);
+            }
+            resolve(this.changes || 0);
+          }
+        );
+      });
+    }
+  } catch (err) {
+    console.error('[EPHEMERAL 24H CLEANUP ERROR]', err);
+    return 0;
   }
 }
 

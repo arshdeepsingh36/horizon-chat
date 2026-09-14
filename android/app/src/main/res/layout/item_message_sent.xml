@@ -107,7 +107,7 @@
                     android:id="@+id/tvTimestamp"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="#FED7AA"
+                    android:textColor="@color/text_secondary"
                     android:textSize="11sp" />
 
                 <!-- Single / Double Tick Status -->
@@ -131,7 +131,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:background="@drawable/circle_avatar_bg"
-        android:backgroundTint="#24334D"
+        android:backgroundTint="@color/surface_elevated"
         android:textColor="@color/text_primary"
         android:textSize="11sp"
         android:paddingHorizontal="6dp"

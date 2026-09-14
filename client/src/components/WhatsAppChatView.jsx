@@ -205,11 +205,12 @@ export default function WhatsAppChatView({
       to: partnerUsername,
       text: textToSend,
       type,
-      mediaUrl
+      mediaUrl,
+      tempId
     }, (res) => {
       if (res?.success && res.message) {
         setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? res.message : m))
+          prev.map((m) => (m.id === tempId || (m.tempId && m.tempId === tempId) ? res.message : m))
         );
         onMessageSent?.(res.message);
       }

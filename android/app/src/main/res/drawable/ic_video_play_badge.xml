@@ -5,15 +5,15 @@
     android:viewportHeight="48">
     <!-- Semi-transparent dark circular backdrop -->
     <path
-        android:fillColor="#B30E1626"
+        android:fillColor="#B3121214"
         android:pathData="M24,24m-22,0a22,22 0,1 1,44 0a22,22 0,1 1,-44 0" />
-    <!-- Sunset Glow Amber ring -->
+    <!-- Primary accent ring -->
     <path
-        android:strokeColor="#F59E0B"
+        android:strokeColor="#4E75F8"
         android:strokeWidth="1.5"
         android:pathData="M24,24m-22,0a22,22 0,1 1,44 0a22,22 0,1 1,-44 0" />
     <!-- Play arrow -->
     <path
-        android:fillColor="#FFFBEB"
+        android:fillColor="#F4F4F6"
         android:pathData="M18,14l16,10 -16,10z" />
 </vector>

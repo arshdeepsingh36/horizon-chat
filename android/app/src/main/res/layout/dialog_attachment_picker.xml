@@ -11,7 +11,7 @@
         android:layout_width="40dp"
         android:layout_height="4dp"
         android:layout_gravity="center_horizontal"
-        android:background="#334155"
+        android:background="@color/surface_elevated"
         android:layout_marginBottom="16dp" />
 
     <TextView
@@ -48,10 +48,10 @@
                 android:layout_width="54dp"
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
+                android:backgroundTint="@color/surface_elevated"
                 android:src="@drawable/ic_attach_gallery"
                 android:padding="13dp"
-                app:tint="#EA580C" />
+                app:tint="@color/primary_coral" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -79,10 +79,10 @@
                 android:layout_width="54dp"
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
+                android:backgroundTint="@color/surface_elevated"
                 android:src="@drawable/ic_video_play_badge"
                 android:padding="13dp"
-                app:tint="#F59E0B" />
+                app:tint="@color/primary_coral" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -110,7 +110,7 @@
                 android:layout_width="54dp"
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
+                android:backgroundTint="@color/surface_elevated"
                 android:src="@drawable/ic_horizon_doc_badge"
                 android:padding="8dp" />
 
@@ -141,10 +141,10 @@
                 android:layout_width="54dp"
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
+                android:backgroundTint="@color/surface_elevated"
                 android:src="@drawable/ic_camera"
                 android:padding="13dp"
-                app:tint="#10B981" />
+                app:tint="@color/online_green" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -173,10 +173,10 @@
                 android:layout_width="54dp"
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
+                android:backgroundTint="@color/surface_elevated"
                 android:src="@drawable/ic_attach_mic"
                 android:padding="13dp"
-                app:tint="#F59E0B" />
+                app:tint="@color/primary_coral" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -205,10 +205,10 @@
                 android:layout_width="54dp"
                 android:layout_height="54dp"
                 android:background="@drawable/circle_avatar_bg"
-                android:backgroundTint="#24334D"
+                android:backgroundTint="@color/surface_elevated"
                 android:src="@drawable/ic_attach_location"
                 android:padding="13dp"
-                app:tint="#38BDF8" />
+                app:tint="@color/primary_coral" />
 
             <TextView
                 android:layout_width="wrap_content"

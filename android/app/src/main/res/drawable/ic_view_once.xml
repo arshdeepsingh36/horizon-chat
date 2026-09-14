@@ -5,13 +5,13 @@
     android:viewportHeight="24">
     <!-- Outer dashed/solid circle -->
     <path
-        android:strokeColor="#F59E0B"
+        android:strokeColor="#4E75F8"
         android:strokeWidth="1.8"
         android:strokeLineCap="round"
         android:pathData="M12,2 A10,10 0 1,1 11.9,2 Z" />
     <!-- Digit 1 in center -->
     <path
-        android:strokeColor="#F59E0B"
+        android:strokeColor="#4E75F8"
         android:strokeWidth="2.0"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"

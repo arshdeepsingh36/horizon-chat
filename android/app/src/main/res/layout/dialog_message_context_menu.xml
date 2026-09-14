@@ -16,7 +16,7 @@
         android:orientation="horizontal"
         android:gravity="center"
         android:background="@drawable/input_bg"
-        android:backgroundTint="#24334D"
+        android:backgroundTint="@color/surface"
         android:paddingVertical="8dp"
         android:paddingHorizontal="4dp"
         android:layout_marginBottom="16dp">

@@ -245,6 +245,7 @@ object MessageDispatchManager {
                 put("isViewOnce", pending.isViewOnce)
                 if (pending.replyToId != null) put("replyToId", pending.replyToId)
                 put("localClientId", localId)
+                put("tempId", pending.id)
             }
 
             if (sock != null && sock.connected()) {
@@ -253,7 +254,7 @@ object MessageDispatchManager {
                         val res = args[0] as? JSONObject
                         val savedObj = res?.optJSONObject("message")
                         if (savedObj != null) {
-                            val serverMsg = parseJsonMessage(savedObj)
+                            val serverMsg = parseJsonMessage(savedObj).copy(localClientId = localId)
                             pendingQueue.remove(pending)
                             listeners.forEach {
                                 it.onNewMessage(serverMsg)
@@ -338,8 +339,16 @@ object MessageDispatchManager {
         val isViewed = json.optBoolean("is_viewed", false)
         val isPinned = json.optBoolean("is_pinned", false)
         val deletedForEveryone = json.optBoolean("deleted_for_everyone", false)
-        val replyToId = if (json.has("reply_to_id") && !json.isNull("reply_to_id")) json.optLong("reply_to_id") else null
-        val localClientId = if (json.has("local_client_id") && !json.isNull("local_client_id")) json.optString("local_client_id") else null
+        val localClientId = if (json.has("localClientId") && !json.isNull("localClientId")) {
+            json.optString("localClientId")
+        } else if (json.has("local_client_id") && !json.isNull("local_client_id")) {
+            json.optString("local_client_id")
+        } else if (json.has("tempId") && !json.isNull("tempId")) {
+            json.optString("tempId")
+        } else {
+            null
+        }
+        val replyToId = if (json.has("reply_to_id") && !json.isNull("reply_to_id")) json.optLong("reply_to_id") else (if (json.has("replyToId") && !json.isNull("replyToId")) json.optLong("replyToId") else null)
         val createdAt = json.optString("created_at", json.optString("createdAt", ""))
 
         val reactions = mutableMapOf<String, List<Int>>()

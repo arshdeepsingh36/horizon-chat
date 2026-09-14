@@ -91,6 +91,14 @@ class ChatAdapter(
     }
 
     fun appendMessage(message: ChatMessage) {
+        val existingIndex = messages.indexOfFirst {
+            it.id == message.id || (message.localClientId != null && it.localClientId == message.localClientId)
+        }
+        if (existingIndex != -1) {
+            messages[existingIndex] = message
+            notifyItemChanged(existingIndex)
+            return
+        }
         messages.add(message)
         trimToMaxHeap()
         notifyItemInserted(messages.size - 1)
@@ -116,7 +124,9 @@ class ChatAdapter(
         if (activePlayingMsgId == tempId) {
             activePlayingMsgId = serverMsg.id
         }
-        val index = messages.indexOfFirst { it.id == tempId }
+        val index = messages.indexOfFirst {
+            it.id == tempId || it.id == serverMsg.id || (serverMsg.localClientId != null && it.localClientId == serverMsg.localClientId)
+        }
         if (index != -1) {
             messages[index] = serverMsg
             notifyItemChanged(index)
@@ -563,8 +573,15 @@ class ChatAdapter(
             binding.downloadOverlay.setOnClickListener {
                 binding.downloadOverlay.visibility = View.GONE
                 onDownloadClicked(msg)
-                val url = msg.attachmentUrl
-                if (!url.isNullOrEmpty()) {
+                val rawUrl = msg.attachmentUrl
+                val url = if (!rawUrl.isNullOrEmpty()) {
+                    if (rawUrl.startsWith("http://horizon-chat-1.onrender.com")) rawUrl.replace("http://", "https://")
+                    else if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://") && !rawUrl.startsWith("data:") && !rawUrl.startsWith("file://")) {
+                        "${com.chatapp.horizon.network.ApiClient.BASE_URL.trimEnd('/')}/${rawUrl.trimStart('/')}"
+                    } else rawUrl
+                } else ""
+
+                if (url.isNotEmpty()) {
                     if (url.startsWith("data:image/")) {
                         try {
                             val cleanBase64 = url.substringAfter("base64,")
@@ -717,8 +734,9 @@ class ChatAdapter(
             binding.tvVideoCaption.text = if (!msg.messageText.isNullOrEmpty() && msg.messageText != "Video") msg.messageText else "Video"
             binding.tvTimestamp.text = formatTimestamp(msg.createdAt)
             binding.tvVideoSize.text = if (msg.fileSizeBytes > 0) formatFileSize(msg.fileSizeBytes) else "Video File"
-            binding.tvVideoDuration.text = if (msg.thumbnailBlur != null && msg.thumbnailBlur!!.contains("dur:")) {
-                msg.thumbnailBlur!!.substringAfter("dur:")
+            val thumbBlur = msg.thumbnailBlur
+            binding.tvVideoDuration.text = if (thumbBlur != null && thumbBlur.contains("dur:")) {
+                thumbBlur.substringAfter("dur:")
             } else {
                 "▶ Video"
             }
@@ -752,10 +770,10 @@ class ChatAdapter(
                 }
             }
 
-            val rawThumb = if (msg.thumbnailBlur != null && msg.thumbnailBlur!!.contains(";dur:")) {
-                msg.thumbnailBlur!!.substringBefore(";dur:")
-            } else if (msg.thumbnailBlur != null && !msg.thumbnailBlur!!.startsWith("dur:")) {
-                msg.thumbnailBlur
+            val rawThumb = if (thumbBlur != null && thumbBlur.contains(";dur:")) {
+                thumbBlur.substringBefore(";dur:")
+            } else if (thumbBlur != null && !thumbBlur.startsWith("dur:")) {
+                thumbBlur
             } else {
                 null
             }

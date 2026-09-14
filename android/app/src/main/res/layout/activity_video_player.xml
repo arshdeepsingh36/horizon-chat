@@ -32,7 +32,7 @@
         android:layout_height="72dp"
         android:src="@drawable/ic_play_arrow"
         android:background="@drawable/circle_avatar_bg"
-        android:backgroundTint="#800E1626"
+        android:backgroundTint="#80121214"
         android:padding="16dp"
         android:visibility="gone"
         app:tint="@color/accent_amber"
@@ -62,7 +62,7 @@
         android:paddingHorizontal="16dp"
         android:paddingVertical="12dp"
         android:background="@drawable/input_bg"
-        android:backgroundTint="#CC0E1626"
+        android:backgroundTint="#CC121214"
         app:layout_constraintTop_toTopOf="parent">
 
         <ImageView
@@ -135,7 +135,7 @@
         android:gravity="center_vertical"
         android:paddingHorizontal="16dp"
         android:paddingVertical="14dp"
-        android:background="#D9162238"
+        android:background="@color/overlay_blur"
         app:layout_constraintBottom_toBottomOf="parent">
 
         <!-- Play/Pause Button -->

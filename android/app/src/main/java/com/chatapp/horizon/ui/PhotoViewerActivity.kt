@@ -142,6 +142,17 @@ class PhotoViewerActivity : AppCompatActivity() {
         }
     }
 
+    private fun resolveMediaUrl(raw: String): String {
+        if (raw.isBlank()) return ""
+        if (raw.startsWith("http://horizon-chat-1.onrender.com")) {
+            return raw.replace("http://", "https://")
+        }
+        if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:") || raw.startsWith("file://")) {
+            return raw
+        }
+        return "${com.chatapp.horizon.network.ApiClient.BASE_URL.trimEnd('/')}/${raw.trimStart('/')}"
+    }
+
     private fun loadPhoto() {
         if (photoUrl.isEmpty()) {
             Toast.makeText(this, "Photo URL is empty", Toast.LENGTH_SHORT).show()
@@ -188,9 +199,10 @@ class PhotoViewerActivity : AppCompatActivity() {
                 }
 
                 // 3. Remote URL
+                val resolvedUrl = resolveMediaUrl(photoUrl)
                 val bmp = Glide.with(this@PhotoViewerActivity)
                     .asBitmap()
-                    .load(photoUrl)
+                    .load(resolvedUrl)
                     .diskCacheStrategy(DiskCacheStrategy.ALL)
                     .submit()
                     .get()
@@ -204,7 +216,7 @@ class PhotoViewerActivity : AppCompatActivity() {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
                     binding.pbPhotoLoading.visibility = View.GONE
-                    Toast.makeText(this@PhotoViewerActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@PhotoViewerActivity, "Unable to load full photo", Toast.LENGTH_SHORT).show()
                 }
             }
         }

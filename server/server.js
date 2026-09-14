@@ -29,7 +29,8 @@ import {
   toggleMessageReaction,
   deleteMessage,
   pinMessage,
-  markConversationRead
+  markConversationRead,
+  deleteExpiredSeenMessages
 } from './db.js';
 import {
   isR2Configured,
@@ -534,8 +535,8 @@ app.post('/api/media/presign', authenticateToken, async (req, res) => {
     const fileExt = fileName.includes('.') ? fileName.split('.').pop() : 'png';
     const key = `uploads/${req.user.id}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
 
-    let uploadUrl;
-    let publicUrl;
+    const serverHost = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
+    const cleanFileName = key.replace(/[^a-zA-Z0-9._-]/g, '_');
 
     if (r2Client && process.env.R2_BUCKET_NAME) {
       const command = new PutObjectCommand({
@@ -547,12 +548,12 @@ app.post('/api/media/presign', authenticateToken, async (req, res) => {
       const publicBase = process.env.R2_PUBLIC_DOMAIN || `https://${process.env.R2_BUCKET_NAME}.r2.cloudflarestorage.com`;
       publicUrl = `${publicBase}/${key}`;
     } else {
-      // Local/Testing Simulated Presigned URL (Zero-Cost Free Tier Fallback)
-      uploadUrl = `${req.protocol}://${req.get('host')}/api/media/mock-upload/${encodeURIComponent(key)}`;
-      publicUrl = `https://pub-r2.storage.cloud/${key}`;
+      // Direct Server Upload Receiver Fallback (Guaranteed Accessible URL)
+      uploadUrl = `${serverHost}/api/media/mock-upload/${encodeURIComponent(cleanFileName)}`;
+      publicUrl = `${serverHost}/uploads/${cleanFileName}`;
     }
 
-    // Standard 20x20 blurred micro-thumbnail sample Base64 (~200 bytes) (rules.md Section 3)
+    // Standard 20x20 blurred micro-thumbnail sample Base64 (~200 bytes)
     const thumbnailBlur = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAAMklEQVR42mNk+M9Qz0AEYCJVE6OaRjWNahrVNKppVNOoplFNo5pGNY1qGtU0qmlU06iSAQBvGQ4RFy5yRwAAAABJRU5ErkJggg==';
 
     return res.json({
@@ -569,10 +570,18 @@ app.post('/api/media/presign', authenticateToken, async (req, res) => {
   }
 });
 
-// Mock binary receiver for testing direct-to-R2 uploads without live Cloudflare credentials
-app.put('/api/media/mock-upload/:key', (req, res) => {
-  // Simulates cloud storage bucket acknowledging the PUT upload
-  return res.status(200).send({ success: true, message: 'Simulated R2 Direct Upload Successful' });
+// Binary upload receiver for direct server fallback storage
+app.put('/api/media/mock-upload/:key', express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
+  try {
+    const rawKey = decodeURIComponent(req.params.key);
+    const cleanFileName = rawKey.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = path.join(uploadsDir, cleanFileName);
+    fs.writeFileSync(filePath, req.body);
+    return res.status(200).json({ success: true, message: 'Upload saved successfully' });
+  } catch (err) {
+    console.error('[MOCK UPLOAD SAVE ERROR]', err);
+    return res.status(500).json({ error: 'Failed to save upload' });
+  }
 });
 
 app.post('/api/media/upload', authenticateToken, async (req, res) => {
@@ -688,8 +697,10 @@ io.on('connection', (socket) => {
   socket.on('send_message', async (payload, callback) => {
     const {
       recipientId,
+      to,
       text,
       attachmentType = 'NONE',
+      type = 'NONE',
       attachmentUrl = null,
       mediaUrl = null,
       r2Key = null,
@@ -698,10 +709,19 @@ io.on('connection', (socket) => {
       fileSizeBytes = 0,
       isViewOnce = false,
       replyToId = null,
-      tempId = null
+      tempId = null,
+      localClientId = null
     } = payload || {};
 
-    const rId = Number(recipientId);
+    const resolvedTempId = tempId || localClientId || payload?.tempId || payload?.localClientId || null;
+    const resolvedLocalClientId = localClientId || tempId || payload?.localClientId || payload?.tempId || null;
+
+    let rId = Number(recipientId);
+    if (!rId && to) {
+      const u = await getUserByUsername(to);
+      if (u) rId = u.id;
+    }
+
     if (!rId) {
       if (typeof callback === 'function') callback({ success: false, error: 'Recipient ID is required' });
       return;
@@ -760,7 +780,7 @@ io.on('connection', (socket) => {
         senderId: userId,
         recipientId: rId,
         text: text || '',
-        attachmentType,
+        attachmentType: attachmentType !== 'NONE' ? attachmentType : type,
         attachmentUrl: finalAttachmentUrl,
         r2Key: r2Key || r2_key || null,
         thumbnailBlur,
@@ -770,7 +790,12 @@ io.on('connection', (socket) => {
         replyToId
       });
 
-      const messageWithTempId = { ...savedRecord, tempId };
+      const messageWithTempId = {
+        ...savedRecord,
+        tempId: resolvedTempId,
+        localClientId: resolvedLocalClientId,
+        local_client_id: resolvedLocalClientId
+      };
 
       // 2. Server calls client acknowledgement callback with ID and tempId for optimistic reconciliation
       if (typeof callback === 'function') {
@@ -999,11 +1024,18 @@ io.on('connection', (socket) => {
 async function start() {
   try {
     await initDb();
+
+    // Auto-delete seen messages older than 24 hours (24h Ephemeral Retention)
+    await deleteExpiredSeenMessages();
+    setInterval(() => {
+      deleteExpiredSeenMessages().catch(e => console.error('[CLEANUP INTERVAL ERROR]', e));
+    }, 10 * 60 * 1000); // Check every 10 minutes
+
     server.listen(PORT, () => {
       console.log(`=======================================================`);
       console.log(`Horizon Chat Backend Server running on port ${PORT}`);
       console.log(`Architecture: TRD v2.0.0 (Neon PostgreSQL + Cursor Paging)`);
-      console.log(`Theme: Sunset Glow & Twilight Ocean`);
+      console.log(`Ephemeral: Auto-delete 24 hours after seen active`);
       console.log(`Ready for Android and Web clients.`);
       console.log(`=======================================================`);
     });

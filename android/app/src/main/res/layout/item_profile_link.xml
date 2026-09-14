@@ -15,7 +15,7 @@
         android:src="@drawable/ic_link"
         android:padding="6dp"
         android:background="@drawable/circle_avatar_bg"
-        android:backgroundTint="#24334D"
+        android:backgroundTint="@color/surface_elevated"
         app:tint="@color/accent_amber" />
 
     <LinearLayout
@@ -52,7 +52,7 @@
         android:textColor="@color/text_primary"
         android:textSize="11sp"
         android:textStyle="bold"
-        android:background="#24334D"
+        android:background="@color/surface_elevated"
         android:paddingHorizontal="8dp"
         android:paddingVertical="4dp" />
 

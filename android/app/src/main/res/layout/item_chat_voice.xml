@@ -57,7 +57,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="0:05"
-                        android:textColor="#FED7AA"
+                        android:textColor="@color/text_secondary"
                         android:textSize="11sp"
                         android:layout_marginTop="2dp" />
 
@@ -85,7 +85,7 @@
                     android:id="@+id/tvTimestamp"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="#FED7AA"
+                    android:textColor="@color/text_secondary"
                     android:textSize="11sp" />
 
                 <ImageView

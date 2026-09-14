@@ -141,7 +141,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#24334D"
+        android:background="@color/surface_elevated"
         android:paddingHorizontal="12dp"
         android:paddingVertical="8dp"
         android:visibility="gone"
@@ -266,7 +266,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:background="#1E293B"
+            android:background="@color/surface_elevated"
             android:padding="8dp"
             android:gravity="center_vertical"
             android:visibility="gone">

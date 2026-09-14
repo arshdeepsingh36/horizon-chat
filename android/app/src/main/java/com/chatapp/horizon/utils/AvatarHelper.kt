@@ -1,11 +1,17 @@
 package com.chatapp.horizon.utils
 
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
+import com.chatapp.horizon.network.ApiClient
 import java.util.Locale
 import kotlin.math.abs
 
@@ -21,6 +27,17 @@ object AvatarHelper {
         "#0D9488", // Deep Teal
         "#4F46E5"  // Indigo
     )
+
+    fun resolveMediaUrl(rawUrl: String?): String? {
+        if (rawUrl.isNullOrBlank()) return null
+        if (rawUrl.startsWith("http://horizon-chat-1.onrender.com")) {
+            return rawUrl.replace("http://", "https://")
+        }
+        if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || rawUrl.startsWith("data:") || rawUrl.startsWith("file://")) {
+            return rawUrl
+        }
+        return "${ApiClient.BASE_URL.trimEnd('/')}/${rawUrl.trimStart('/')}"
+    }
 
     fun getInitials(name: String?): String {
         if (name.isNullOrBlank()) return "?"
@@ -62,12 +79,14 @@ object AvatarHelper {
         }
         initialsView.background = bgDrawable
 
-        if (!avatarUrl.isNullOrBlank()) {
+        val resolved = resolveMediaUrl(avatarUrl)
+        if (!resolved.isNullOrBlank()) {
             imageView.visibility = View.VISIBLE
             initialsView.visibility = View.GONE
             Glide.with(imageView.context)
-                .load(avatarUrl)
+                .load(resolved)
                 .circleCrop()
+                .error(bgDrawable)
                 .into(imageView)
         } else {
             imageView.visibility = View.GONE
