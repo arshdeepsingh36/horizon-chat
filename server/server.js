@@ -65,6 +65,29 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use('/uploads', express.static(uploadsDir, { acceptRanges: true }));
 
+// Direct APK Download Endpoint with Android Package Archive MIME type (prevents download manager hang)
+app.get(['/download/apk', '/horizon-chat.apk', '/api/download/apk', '/download'], (req, res) => {
+  const possiblePaths = [
+    path.join(__dirname, '../apk/horizon-chat-v3.0.0.apk'),
+    path.join(__dirname, '../apk/app-debug.apk'),
+    path.join(__dirname, 'horizon-chat.apk'),
+    path.join(uploadsDir, 'horizon-chat.apk')
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      const stats = fs.statSync(p);
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', 'attachment; filename="horizon-chat-v3.0.0.apk"');
+      res.setHeader('Content-Length', stats.size);
+      res.setHeader('Accept-Ranges', 'bytes');
+      return res.sendFile(path.resolve(p));
+    }
+  }
+
+  return res.status(404).send('APK file not found on server.');
+});
+
 // In-Memory Socket Map: userId (Int) -> Set<socket.id>
 const onlineUsers = new Map();
 
