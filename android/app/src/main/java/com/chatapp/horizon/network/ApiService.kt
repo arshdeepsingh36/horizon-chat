@@ -36,6 +36,12 @@ interface ApiService {
         @Header("Authorization") token: String
     ): Response<List<Conversation>>
 
+    @POST("api/upload/presigned-url")
+    suspend fun getPresignedUploadUrl(
+        @Header("Authorization") token: String,
+        @Body request: PresignedUrlRequest
+    ): Response<PresignedUrlResponse>
+
     @POST("api/media/presign")
     suspend fun presignMediaUpload(
         @Header("Authorization") token: String,

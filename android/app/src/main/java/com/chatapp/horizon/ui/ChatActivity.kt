@@ -42,6 +42,7 @@ import com.chatapp.horizon.databinding.DialogMessageContextMenuBinding
 import com.chatapp.horizon.models.*
 import com.chatapp.horizon.network.ApiClient
 import com.chatapp.horizon.network.MessageDispatchManager
+import com.chatapp.horizon.network.R2Uploader
 import com.chatapp.horizon.utils.AvatarHelper
 import com.chatapp.horizon.utils.HorizonNotificationManager
 import com.chatapp.horizon.utils.TimeFormatHelper
@@ -188,7 +189,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
         setContentView(binding.root)
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
-        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("token", "") ?: ""
+        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("horizon_token", null) ?: prefs.getString("token", "") ?: ""
         currentUserId = intent.getIntExtra("CURRENT_USER_ID", prefs.getInt("userId", 1))
         targetUserId = intent.getIntExtra("TARGET_USER_ID", 2)
         targetUsername = intent.getStringExtra("TARGET_USERNAME") ?: "User"
@@ -821,19 +822,20 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val bytes = file.readBytes()
-                val base64 = "data:audio/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val uploadReq = MediaUploadRequest(
-                    imageBase64 = base64,
-                    fileName = "voice_${System.currentTimeMillis()}.m4a",
-                    fileSizeBytes = bytes.size.toLong(),
-                    thumbnailBlur = null
+                val fileName = "voice_${System.currentTimeMillis()}.m4a"
+
+                val uploadResult = R2Uploader.uploadBinary(
+                    context = this@ChatActivity,
+                    bytes = bytes,
+                    uploadType = "chat_media",
+                    recipientUsername = targetUsername,
+                    mediaType = "voice",
+                    fileName = fileName,
+                    contentType = "audio/mp4",
+                    isViewOnce = isViewOnceActive,
+                    explicitToken = authToken
                 )
-                val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
-                val finalUrl = if (response.isSuccessful && response.body() != null) {
-                    response.body()!!.attachmentUrl
-                } else {
-                    base64
-                }
+                val finalUrl = uploadResult.publicUrl
 
                 val viewOnce = isViewOnceActive
                 withContext(Dispatchers.Main) {
@@ -860,7 +862,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "Failed to upload voice note: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChatActivity, "Failed to upload voice note: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
                 file.delete()
@@ -1007,20 +1009,20 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
 
                 val metaThumb = (thumbBase64 ?: "") + ";dur:" + durationText
                 val viewOnce = isViewOnceActive
+                val fileName = "video_${currentTempId}.mp4"
 
-                val base64 = "data:video/mp4;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val uploadReq = MediaUploadRequest(
-                    imageBase64 = base64,
-                    fileName = "video_${currentTempId}.mp4",
-                    fileSizeBytes = bytes.size.toLong(),
-                    thumbnailBlur = thumbBase64
+                val uploadResult = R2Uploader.uploadBinary(
+                    context = this@ChatActivity,
+                    bytes = bytes,
+                    uploadType = "chat_media",
+                    recipientUsername = targetUsername,
+                    mediaType = "video",
+                    fileName = fileName,
+                    contentType = "video/mp4",
+                    isViewOnce = viewOnce,
+                    explicitToken = authToken
                 )
-                val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
-                val finalUrl = if (response.isSuccessful && response.body() != null) {
-                    response.body()!!.attachmentUrl
-                } else {
-                    base64
-                }
+                val finalUrl = uploadResult.publicUrl
 
                 withContext(Dispatchers.Main) {
                     isViewOnceActive = false
@@ -1039,7 +1041,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "Failed to upload video: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChatActivity, "Failed to upload video: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -1138,7 +1140,6 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                     scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, fullStream)
                     val imageBytes = fullStream.toByteArray()
                     val fullSize = imageBytes.size.toLong()
-                    val fullBase64 = "data:image/jpeg;base64," + Base64.encodeToString(imageBytes, Base64.NO_WRAP)
 
                     val viewOnce = isViewOnceActive
                     withContext(Dispatchers.Main) {
@@ -1146,23 +1147,19 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                         updateViewOnceToggleUI()
                     }
 
-                    var uploadedUrl: String? = null
-                    try {
-                        val uploadReq = MediaUploadRequest(
-                            imageBase64 = fullBase64,
-                            fileName = "photo_${System.currentTimeMillis()}.jpg",
-                            fileSizeBytes = fullSize,
-                            thumbnailBlur = thumbBase64
-                        )
-                        val uploadRes = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
-                        if (uploadRes.isSuccessful && uploadRes.body() != null) {
-                            uploadedUrl = uploadRes.body()!!.attachmentUrl
-                        }
-                    } catch (uploadErr: Exception) {
-                        uploadErr.printStackTrace()
-                    }
-
-                    val finalUrl = uploadedUrl ?: fullBase64
+                    val fileName = "photo_${System.currentTimeMillis()}.jpg"
+                    val uploadResult = R2Uploader.uploadBinary(
+                        context = this@ChatActivity,
+                        bytes = imageBytes,
+                        uploadType = "chat_media",
+                        recipientUsername = targetUsername,
+                        mediaType = "image",
+                        fileName = fileName,
+                        contentType = "image/jpeg",
+                        isViewOnce = viewOnce,
+                        explicitToken = authToken
+                    )
+                    val finalUrl = uploadResult.publicUrl
 
                     withContext(Dispatchers.Main) {
                         sendMessage(
@@ -1179,7 +1176,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "Failed to load image: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChatActivity, "Failed to upload image: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -1213,14 +1210,6 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
 
                 if (docSize == 0L) docSize = bytes.size.toLong()
 
-                val base64 = "data:application/octet-stream;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-                val uploadReq = MediaUploadRequest(
-                    imageBase64 = base64,
-                    fileName = docName,
-                    fileSizeBytes = docSize,
-                    thumbnailBlur = null
-                )
-
                 try {
                     val docsDir = File(cacheDir, "documents").apply { mkdirs() }
                     File(docsDir, docName).writeBytes(bytes)
@@ -1228,12 +1217,19 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                     e.printStackTrace()
                 }
 
-                val response = ApiClient.apiService.uploadMedia("Bearer $authToken", uploadReq)
-                val finalUrl = if (response.isSuccessful && response.body() != null) {
-                    response.body()!!.attachmentUrl
-                } else {
-                    base64
-                }
+                val docContentType = R2Uploader.resolveContentType(this@ChatActivity, uri, "application/pdf")
+                val uploadResult = R2Uploader.uploadBinary(
+                    context = this@ChatActivity,
+                    bytes = bytes,
+                    uploadType = "chat_media",
+                    recipientUsername = targetUsername,
+                    mediaType = "file",
+                    fileName = docName,
+                    contentType = docContentType,
+                    isViewOnce = false,
+                    explicitToken = authToken
+                )
+                val finalUrl = uploadResult.publicUrl
 
                 withContext(Dispatchers.Main) {
                     sendMessage(
@@ -1249,7 +1245,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@ChatActivity, "Failed to upload document: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChatActivity, "Failed to upload document: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }

@@ -28,7 +28,8 @@ class ProfileActivity : AppCompatActivity() {
     private var authToken: String = ""
     private var currentUserId: Int = 0
     private var currentUsername: String = ""
-    private var pendingAvatarBase64: String? = null
+    private var pendingAvatarBytes: ByteArray? = null
+    private var currentAvatarUrl: String? = null
 
     private val pickImageLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let { handleAvatarPicked(it) }
@@ -40,7 +41,7 @@ class ProfileActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
-        authToken = prefs.getString("token", "") ?: ""
+        authToken = prefs.getString("horizon_token", null) ?: prefs.getString("token", "") ?: ""
         currentUserId = prefs.getInt("user_id", 0)
         currentUsername = prefs.getString("username", "") ?: "User"
 
@@ -84,6 +85,7 @@ class ProfileActivity : AppCompatActivity() {
                 if (res.isSuccessful && res.body() != null) {
                     val user = res.body()!!
                     withContext(Dispatchers.Main) {
+                        currentAvatarUrl = user.avatarUrl
                         binding.etDisplayName.setText(user.displayName ?: user.username)
                         binding.etBioStatus.setText(user.bioStatus ?: "Hey there! I am using Horizon Chat.")
 
@@ -113,14 +115,25 @@ class ProfileActivity : AppCompatActivity() {
             val bitmap = BitmapFactory.decodeStream(inputStream)
             inputStream?.close()
 
-            // Scale down to avatar size (max 200x200)
-            val scaled = Bitmap.createScaledBitmap(bitmap, 200, 200, true)
+            if (bitmap == null) {
+                Toast.makeText(this, "Failed to decode selected image", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            // Scale down to avatar size (max 512x512) for crisp quality
+            val maxDim = 512
+            val width = bitmap.width
+            val height = bitmap.height
+            val ratio = Math.min(1.0, maxDim.toDouble() / Math.max(width, height))
+            val scaled = if (ratio < 1.0) {
+                Bitmap.createScaledBitmap(bitmap, (width * ratio).toInt(), (height * ratio).toInt(), true)
+            } else {
+                bitmap
+            }
+
             val baos = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.JPEG, 85, baos)
-            val bytes = baos.toByteArray()
-            val base64 = "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-
-            pendingAvatarBase64 = base64
+            pendingAvatarBytes = baos.toByteArray()
 
             binding.tvAvatarInitials.visibility = View.GONE
             binding.ivProfileAvatar.visibility = View.VISIBLE
@@ -129,7 +142,7 @@ class ProfileActivity : AppCompatActivity() {
                 .circleCrop()
                 .into(binding.ivProfileAvatar)
 
-            Toast.makeText(this, "Profile photo ready. Tap 'Save Profile' to apply.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Profile photo selected. Tap 'Save Profile' to upload.", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "Failed to load image: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
         }
@@ -149,26 +162,48 @@ class ProfileActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                var finalAvatarUrl = currentAvatarUrl
+
+                // 1. If a new avatar was picked, upload directly to Cloudflare R2
+                if (pendingAvatarBytes != null) {
+                    val uploadResult = com.chatapp.horizon.network.R2Uploader.uploadBinary(
+                        context = this@ProfileActivity,
+                        bytes = pendingAvatarBytes!!,
+                        uploadType = "pfp",
+                        recipientUsername = "general",
+                        mediaType = "pfp",
+                        fileName = "avatar_${currentUsername}_${System.currentTimeMillis()}.jpg",
+                        contentType = "image/jpeg",
+                        isViewOnce = false,
+                        explicitToken = authToken
+                    )
+                    finalAvatarUrl = uploadResult.publicUrl
+                }
+
+                // 2. Save profile metadata with R2 public URL
                 val req = UpdateProfileRequest(
                     displayName = displayName,
                     bioStatus = bioStatus,
-                    avatarUrl = pendingAvatarBase64
+                    avatarUrl = finalAvatarUrl
                 )
                 val res = ApiClient.apiService.updateProfile("Bearer $authToken", req)
                 withContext(Dispatchers.Main) {
                     binding.btnSaveProfile.isEnabled = true
                     binding.btnSaveProfile.text = "Save Profile"
                     if (res.isSuccessful) {
+                        currentAvatarUrl = finalAvatarUrl
+                        pendingAvatarBytes = null
                         Toast.makeText(this@ProfileActivity, "Profile updated successfully! ✨", Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(this@ProfileActivity, "Failed to update profile", Toast.LENGTH_SHORT).show()
+                        val err = res.errorBody()?.string() ?: "Unknown error"
+                        Toast.makeText(this@ProfileActivity, "Failed to update profile: $err", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     binding.btnSaveProfile.isEnabled = true
                     binding.btnSaveProfile.text = "Save Profile"
-                    Toast.makeText(this@ProfileActivity, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ProfileActivity, "Upload Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }

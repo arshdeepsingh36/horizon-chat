@@ -120,6 +120,49 @@ data class ProfileResponse(
     val user: User
 )
 
+data class PresignedUrlRequest(
+    @SerializedName("uploadType")
+    val uploadType: String = "chat_media", // "pfp" or "chat_media"
+
+    @SerializedName("recipientUsername")
+    val recipientUsername: String? = "general",
+
+    @SerializedName("mediaType")
+    val mediaType: String? = "image", // "image", "video", "voice", "file", "pfp"
+
+    @SerializedName("fileName")
+    val fileName: String,
+
+    @SerializedName("contentType")
+    val contentType: String,
+
+    @SerializedName("isViewOnce")
+    val isViewOnce: Boolean = false,
+
+    @SerializedName("fileSizeBytes")
+    val fileSizeBytes: Long? = 0
+)
+
+data class PresignedUrlResponse(
+    @SerializedName("success")
+    val success: Boolean = true,
+
+    @SerializedName("uploadUrl")
+    val uploadUrl: String,
+
+    @SerializedName("key")
+    val key: String,
+
+    @SerializedName("publicUrl")
+    val publicUrl: String,
+
+    @SerializedName("mediaType")
+    val mediaType: String? = null,
+
+    @SerializedName("isViewOnce")
+    val isViewOnce: Boolean? = false
+)
+
 data class PresignRequest(
     @SerializedName("fileName")
     val fileName: String,

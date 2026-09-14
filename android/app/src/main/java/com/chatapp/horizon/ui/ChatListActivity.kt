@@ -37,7 +37,7 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageEven
         HorizonNotificationManager.init(this)
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
-        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("token", "") ?: ""
+        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("horizon_token", null) ?: prefs.getString("token", "") ?: ""
         currentUserId = intent.getIntExtra("CURRENT_USER_ID", prefs.getInt("user_id", 1))
         currentUsername = intent.getStringExtra("CURRENT_USERNAME") ?: prefs.getString("username", "User") ?: "User"
 

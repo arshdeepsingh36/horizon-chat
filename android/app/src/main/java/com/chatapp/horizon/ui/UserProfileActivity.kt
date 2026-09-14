@@ -62,7 +62,7 @@ class UserProfileActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
-        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("token", "") ?: ""
+        authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("horizon_token", null) ?: prefs.getString("token", "") ?: ""
         targetUserId = intent.getIntExtra("TARGET_USER_ID", 0)
         targetUsername = intent.getStringExtra("TARGET_USERNAME") ?: "User"
         targetDisplayName = intent.getStringExtra("TARGET_DISPLAY_NAME") ?: targetUsername

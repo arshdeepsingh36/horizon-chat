@@ -83,6 +83,7 @@ class AuthActivity : AppCompatActivity() {
                             val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
                             prefs.edit()
                                 .putString("token", body.token)
+                                .putString("horizon_token", body.token)
                                 .putInt("user_id", body.user.id)
                                 .putString("username", body.user.username)
                                 .apply()

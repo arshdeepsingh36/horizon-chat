@@ -389,19 +389,29 @@ app.post('/api/upload/presigned-url', authenticateToken, async (req, res) => {
       });
     }
 
+    let username = req.user?.username;
+    if (!username && req.user?.id) {
+      const dbUser = await findUserById(req.user.id);
+      username = dbUser?.username;
+    }
+    username = username || 'user';
+
+    const cleanContentType = contentType || 'application/octet-stream';
     const key = buildR2Key({
-      username: req.user.username,
+      username,
       uploadType: uploadType || (mediaType === 'pfp' ? 'pfp' : 'chat_media'),
       recipientUsername: recipientUsername || 'general',
       mediaType: mediaType || 'image',
       fileName: fileName || 'file.bin',
-      contentType: contentType || 'application/octet-stream',
+      contentType: cleanContentType,
       isViewOnce: Boolean(isViewOnce)
     });
 
+    console.log(`[R2 PRESIGN] User @${username} requesting upload URL for key: ${key} (Type: ${cleanContentType})`);
+
     const { uploadUrl, publicUrl } = await generatePresignedUploadUrl({
       key,
-      contentType: contentType || 'application/octet-stream',
+      contentType: cleanContentType,
       expiresIn: 3600
     });
 
