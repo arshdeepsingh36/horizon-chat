@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p /tmp/dist
           cp android/app/build/outputs/apk/debug/*.apk /tmp/dist/app-debug.apk
-          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v3.0.0.apk
+          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v3.1.0.apk
           ls -la /tmp/dist/
 
       - name: Upload APK Artifact
@@ -65,11 +65,11 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || 'v3.0-latest' }}
-          name: "Horizon Chat v3.0.0 Phase 3 Release"
-          body: "Horizon Chat v3.0.0 featuring Cloudflare R2 Direct Media Storage, Permanent Media Retention, Multi-Format Attachments (Photos, Videos, Audio Notes, Documents), 1-View Mode, and Muted High-Contrast Professional Theme."
+          tag_name: ${{ (github.ref_type == 'tag' && github.ref_name) || 'v3.1.0' }}
+          name: "Horizon Chat v3.1.0 Release"
+          body: "Horizon Chat v3.1.0 - Android R2 direct upload pipeline, user namespacing, strict Content-Type headers, persistent authentication, live chat, and audio voice notes."
           files: |
             /tmp/dist/app-debug.apk
-            /tmp/dist/horizon-chat-v3.0.0.apk
+            /tmp/dist/horizon-chat-v3.1.0.apk
           token: ${{ secrets.GITHUB_TOKEN }}
 
