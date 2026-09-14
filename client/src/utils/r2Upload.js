@@ -84,10 +84,11 @@ export async function uploadToR2({
     throw new Error(errorData.error || `Failed to generate upload URL (${presignRes.status})`);
   }
 
-  const { uploadUrl, key, publicUrl } = await presignRes.json();
+  const presignData = await presignRes.json();
+  const { uploadUrl, key, publicUrl } = presignData || {};
 
-  if (!uploadUrl) {
-    throw new Error('Server did not return a valid presigned upload URL.');
+  if (!uploadUrl || !publicUrl) {
+    throw new Error('Server did not return a valid presigned upload URL or public URL.');
   }
 
   // 2. Direct binary PUT to Cloudflare R2
@@ -100,7 +101,7 @@ export async function uploadToR2({
   });
 
   if (!uploadRes.ok) {
-    throw new Error(`Direct R2 upload failed with status ${uploadRes.status}: ${uploadRes.statusText}`);
+    throw new Error(`Direct R2 upload failed with HTTP status ${uploadRes.status}: ${uploadRes.statusText}`);
   }
 
   return {
@@ -110,6 +111,43 @@ export async function uploadToR2({
     contentType,
     fileSize: fileToUpload.size
   };
+}
+
+/**
+ * Sanitize and clean any malformed URL (e.g. markdown links, leading slashes)
+ */
+export function sanitizeMediaUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  let url = rawUrl.trim();
+
+  // If URL has leading / before http(s): /https://... -> https://...
+  if (url.startsWith('/http://') || url.startsWith('/https://')) {
+    url = url.slice(1);
+  }
+
+  // If URL is markdown link: [https://domain](https://domain)/path -> https://domain/path
+  const mdMatch = url.match(/^\[(.*?)\]\((https?:\/\/[^\s\)]+)\)(.*)$/);
+  if (mdMatch) {
+    const base = mdMatch[2].replace(/\/+$/, '');
+    const trailing = (mdMatch[3] || '').replace(/^\/+/, '');
+    url = trailing ? `${base}/${trailing}` : base;
+  } else if (url.startsWith('[') && url.includes('](')) {
+    const match = url.match(/\]\((.*?)\)/);
+    if (match && match[1]) {
+      const rest = url.substring(url.indexOf(')') + 1);
+      url = match[1] + rest;
+    }
+  }
+
+  // Remove any leftover brackets or leading slashes before protocol
+  url = url.replace(/^\/+/, '');
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+    if (url.includes('r2.dev') || url.includes('r2.cloudflarestorage.com') || url.includes('storage.cloud')) {
+      url = `https://${url}`;
+    }
+  }
+
+  return url;
 }
 
 export default uploadToR2;

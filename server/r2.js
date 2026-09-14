@@ -1,9 +1,19 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
-// Ensure environment variables are loaded
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Ensure environment variables are loaded from server/.env or fallback
+if (fs.existsSync(path.resolve(__dirname, '.env'))) {
+  dotenv.config({ path: path.resolve(__dirname, '.env') });
+} else {
+  dotenv.config();
+}
 
 /**
  * Storage Retention Policy:
@@ -18,20 +28,21 @@ export function getR2Config() {
     accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
     bucketName: process.env.R2_BUCKET_NAME || 'horizon-chat-media',
-    publicUrl: process.env.R2_PUBLIC_URL || process.env.R2_PUBLIC_DOMAIN || '',
+    publicUrl: process.env.R2_PUBLIC_URL || '',
   };
 }
 
 /**
- * Check if Cloudflare R2 credentials are fully configured
+ * Check if Cloudflare R2 credentials and public URL are fully configured
  */
 export function isR2Configured() {
-  const { accountId, accessKeyId, secretAccessKey, bucketName } = getR2Config();
+  const { accountId, accessKeyId, secretAccessKey, bucketName, publicUrl } = getR2Config();
   return Boolean(
     accountId &&
     accessKeyId &&
     secretAccessKey &&
     bucketName &&
+    publicUrl &&
     !accountId.includes('your_') &&
     !accessKeyId.includes('your_')
   );
@@ -140,18 +151,53 @@ export function buildR2Key({
 }
 
 /**
+ * Sanitize and clean any malformed URL (e.g. markdown links, leading slashes)
+ */
+export function sanitizeMediaUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  let url = rawUrl.trim();
+
+  // If URL has leading / before http(s): /https://... -> https://...
+  if (url.startsWith('/http://') || url.startsWith('/https://')) {
+    url = url.slice(1);
+  }
+
+  // If URL is markdown link: [https://domain](https://domain)/path -> https://domain/path
+  const mdMatch = url.match(/^\[(.*?)\]\((https?:\/\/[^\s\)]+)\)(.*)$/);
+  if (mdMatch) {
+    const base = mdMatch[2].replace(/\/+$/, '');
+    const trailing = (mdMatch[3] || '').replace(/^\/+/, '');
+    url = trailing ? `${base}/${trailing}` : base;
+  } else if (url.startsWith('[') && url.includes('](')) {
+    const match = url.match(/\]\((.*?)\)/);
+    if (match && match[1]) {
+      const rest = url.substring(url.indexOf(')') + 1);
+      url = match[1] + rest;
+    }
+  }
+
+  // Remove any leftover brackets or leading slashes before protocol
+  url = url.replace(/^\/+/, '');
+  if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('data:') && !url.startsWith('blob:')) {
+    if (url.includes('r2.dev') || url.includes('r2.cloudflarestorage.com') || url.includes('storage.cloud')) {
+      url = `https://${url}`;
+    }
+  }
+
+  return url;
+}
+
+/**
  * Construct the public URL for an R2 object key
  */
 export function getR2PublicUrl(key) {
-  if (!key) return '';
-  const { publicUrl, bucketName, accountId } = getR2Config();
-  if (publicUrl) {
-    const baseUrl = publicUrl.replace(/\/+$/, '');
-    const cleanKey = key.replace(/^\/+/, '');
-    return `${baseUrl}/${cleanKey}`;
+  if (!process.env.R2_PUBLIC_URL) {
+    throw new Error('R2_PUBLIC_URL environment variable is not defined.');
   }
-  // Fallback direct R2 endpoint if public domain is not configured
-  return `https://${bucketName}.${accountId}.r2.cloudflarestorage.com/${key}`;
+  if (!key) return '';
+  const cleanKey = key.startsWith('/') ? key.slice(1) : key;
+  const baseUrl = sanitizeMediaUrl(process.env.R2_PUBLIC_URL).replace(/\/+$/, '');
+  return `${baseUrl}/${cleanKey}`;
 }
 
 /**

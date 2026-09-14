@@ -42,7 +42,14 @@ export default function HorizonChatList({
   const [displayNameInput, setDisplayNameInput] = useState(user.displayName || user.username || '');
   const [bioStatusInput, setBioStatusInput] = useState(user.bioStatus || 'Hey there! I am using Horizon Chat.');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [failedAvatars, setFailedAvatars] = useState({});
   const fileInputRef = useRef(null);
+
+  const handleAvatarError = (url) => {
+    if (url) {
+      setFailedAvatars((prev) => ({ ...prev, [url]: true }));
+    }
+  };
 
   const handleAvatarFileSelect = async (e) => {
     const file = e.target.files?.[0];
@@ -57,7 +64,7 @@ export default function HorizonChatList({
     setAvatarError('');
 
     try {
-      // Direct binary PUT upload to Cloudflare R2
+      // 1. Direct binary PUT upload to Cloudflare R2 (verifying HTTP 200)
       const { publicUrl } = await uploadToR2({
         file,
         uploadType: 'pfp',
@@ -66,7 +73,11 @@ export default function HorizonChatList({
         token
       });
 
-      // Update backend user profile record
+      if (!publicUrl) {
+        throw new Error('Upload completed but failed to obtain public URL.');
+      }
+
+      // 2. ONLY IF the PUT succeeds, call backend user profile update endpoint
       const res = await fetch(`${apiBaseUrl}/api/users/profile`, {
         method: 'PUT',
         headers: {
@@ -82,14 +93,22 @@ export default function HorizonChatList({
       }
 
       const data = await res.json();
-      if (onUpdateUser && data.user) {
-        onUpdateUser(data.user);
+      if (data?.user) {
+        setFailedAvatars((prev) => {
+          const copy = { ...prev };
+          delete copy[publicUrl];
+          return copy;
+        });
+        if (onUpdateUser) {
+          onUpdateUser(data.user);
+        }
       }
     } catch (err) {
       console.error('[AVATAR UPLOAD ERROR]', err);
       setAvatarError(err.message || 'Avatar upload failed.');
     } finally {
       setUploadingAvatar(false);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -213,8 +232,13 @@ export default function HorizonChatList({
             }}
             title="Open Profile Settings"
           >
-            {user.avatarUrl ? (
-              <img src={user.avatarUrl} alt={user.username} className="horizon-avatar-img" />
+            {user.avatarUrl && !failedAvatars[user.avatarUrl] ? (
+              <img
+                src={user.avatarUrl}
+                alt={user.username}
+                className="horizon-avatar-img"
+                onError={() => handleAvatarError(user.avatarUrl)}
+              />
             ) : (
               <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text-primary)' }}>
                 {(user.displayName || user.username || 'U').slice(0, 2).toUpperCase()}
@@ -459,8 +483,13 @@ export default function HorizonChatList({
               >
                 {/* 48x48 Circular Avatar with Online Amber Dot */}
                 <div className={`horizon-cell-avatar ${isOnline ? 'online' : ''}`}>
-                  {chat.partnerAvatarUrl ? (
-                    <img src={chat.partnerAvatarUrl} alt={partnerName} className="horizon-avatar-img" />
+                  {chat.partnerAvatarUrl && !failedAvatars[chat.partnerAvatarUrl] ? (
+                    <img
+                      src={chat.partnerAvatarUrl}
+                      alt={partnerName}
+                      className="horizon-avatar-img"
+                      onError={() => handleAvatarError(chat.partnerAvatarUrl)}
+                    />
                   ) : (
                     (partnerName || 'U').slice(0, 2).toUpperCase()
                   )}
@@ -620,8 +649,13 @@ export default function HorizonChatList({
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div className={`horizon-cell-avatar ${lookupResult.online ? 'online' : ''}`} style={{ width: '40px', height: '40px', fontSize: '15px' }}>
-                      {lookupResult.avatar_url || lookupResult.avatarUrl ? (
-                        <img src={lookupResult.avatar_url || lookupResult.avatarUrl} alt={lookupResult.username} className="horizon-avatar-img" />
+                      {(lookupResult.avatar_url || lookupResult.avatarUrl) && !failedAvatars[lookupResult.avatar_url || lookupResult.avatarUrl] ? (
+                        <img
+                          src={lookupResult.avatar_url || lookupResult.avatarUrl}
+                          alt={lookupResult.username}
+                          className="horizon-avatar-img"
+                          onError={() => handleAvatarError(lookupResult.avatar_url || lookupResult.avatarUrl)}
+                        />
                       ) : (
                         lookupResult.username.slice(0, 2).toUpperCase()
                       )}
@@ -714,8 +748,13 @@ export default function HorizonChatList({
                     boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
                   }}
                 >
-                  {user.avatarUrl ? (
-                    <img src={user.avatarUrl} alt={user.username} className="horizon-avatar-img" />
+                  {user.avatarUrl && !failedAvatars[user.avatarUrl] ? (
+                    <img
+                      src={user.avatarUrl}
+                      alt={user.username}
+                      className="horizon-avatar-img"
+                      onError={() => handleAvatarError(user.avatarUrl)}
+                    />
                   ) : (
                     (displayNameInput || user.username || 'U').slice(0, 2).toUpperCase()
                   )}

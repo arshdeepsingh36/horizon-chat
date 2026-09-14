@@ -24,7 +24,7 @@ import {
   Camera,
   FolderOpen
 } from 'lucide-react';
-import { uploadToR2 } from '../utils/r2Upload';
+import { uploadToR2, sanitizeMediaUrl } from '../utils/r2Upload';
 
 // Helper to normalize message objects across snake_case and camelCase
 function normalizeMsg(m) {
@@ -35,7 +35,8 @@ function normalizeMsg(m) {
   const recipientId = Number(m.recipientId ?? m.recipient_id);
   const text = m.text ?? m.message_text ?? m.messageText ?? '';
   const attachmentType = m.attachmentType ?? m.attachment_type ?? 'NONE';
-  const attachmentUrl = m.attachmentUrl ?? m.attachment_url ?? m.mediaUrl ?? m.media_url ?? null;
+  const rawAttachmentUrl = m.attachmentUrl ?? m.attachment_url ?? m.mediaUrl ?? m.media_url ?? null;
+  const attachmentUrl = rawAttachmentUrl ? sanitizeMediaUrl(rawAttachmentUrl) : null;
   const r2Key = m.r2Key ?? m.r2_key ?? null;
   const thumbnailBlur = m.thumbnailBlur ?? m.thumbnail_blur ?? null;
   const fileSizeBytes = Number(m.fileSizeBytes ?? m.file_size_bytes ?? 0);
@@ -86,6 +87,13 @@ export default function HorizonChatView({
   const [lightboxMedia, setLightboxMedia] = useState(null); // { type: 'IMAGE'|'VIDEO', url, title, sender, timestamp, caption }
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState('media'); // 'media' | 'docs' | 'links'
+  const [failedImages, setFailedImages] = useState({});
+
+  const handleImageError = (urlOrKey) => {
+    if (urlOrKey) {
+      setFailedImages((prev) => ({ ...prev, [urlOrKey]: true }));
+    }
+  };
 
   // Cloudflare R2 Direct Upload & Voice Recording states
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -452,6 +460,10 @@ export default function HorizonChatView({
         token
       });
 
+      if (!publicUrl) {
+        throw new Error('Upload completed but public URL was not returned.');
+      }
+
       socket.emit(
         'send_message',
         {
@@ -626,8 +638,13 @@ export default function HorizonChatView({
               className={`horizon-cell-avatar ${isPartnerOnline ? 'online' : ''}`}
               style={{ width: '38px', height: '38px', fontSize: '14px' }}
             >
-              {partner.avatarUrl || partner.avatar_url ? (
-                <img src={partner.avatarUrl || partner.avatar_url} alt={partner.username} className="horizon-avatar-img" />
+              {(partner.avatarUrl || partner.avatar_url) && !failedImages[partner.avatarUrl || partner.avatar_url] ? (
+                <img
+                  src={partner.avatarUrl || partner.avatar_url}
+                  alt={partner.username}
+                  className="horizon-avatar-img"
+                  onError={() => handleImageError(partner.avatarUrl || partner.avatar_url)}
+                />
               ) : (
                 (partner.username || 'User').slice(0, 2).toUpperCase()
               )}
@@ -770,9 +787,10 @@ export default function HorizonChatView({
                       style={{ marginBottom: '6px', cursor: (isDownloaded || msg.attachmentUrl) ? 'pointer' : 'default' }}
                       onClick={() => {
                         if (isDownloaded || msg.attachmentUrl) {
-                          const url = (msg.attachmentUrl && msg.attachmentUrl.startsWith('http'))
-                            ? msg.attachmentUrl
-                            : `${apiBaseUrl.replace(/\/$/, '')}/${(msg.attachmentUrl || '').replace(/^\//, '')}`;
+                          const cleanUrl = sanitizeMediaUrl(msg.attachmentUrl);
+                          const url = (cleanUrl && (cleanUrl.startsWith('http') || cleanUrl.startsWith('data:') || cleanUrl.startsWith('blob:')))
+                            ? cleanUrl
+                            : `${apiBaseUrl.replace(/\/$/, '')}/${(cleanUrl || '').replace(/^\//, '')}`;
                           setLightboxMedia({
                             type: 'IMAGE',
                             url: url || msg.thumbnailBlur,
@@ -784,11 +802,18 @@ export default function HorizonChatView({
                       }}
                     >
                       <div className="horizon-blur-container">
-                        <img
-                          src={isDownloaded || msg.attachmentUrl ? msg.attachmentUrl : msg.thumbnailBlur}
-                          alt="Attachment preview"
-                          className="horizon-blur-img revealed"
-                        />
+                        {failedImages[msg.attachmentUrl || msg.id] ? (
+                          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                            Image unavailable
+                          </div>
+                        ) : (
+                          <img
+                            src={isDownloaded || msg.attachmentUrl ? sanitizeMediaUrl(msg.attachmentUrl) : msg.thumbnailBlur}
+                            alt="Attachment preview"
+                            className="horizon-blur-img revealed"
+                            onError={() => handleImageError(msg.attachmentUrl || msg.id)}
+                          />
+                        )}
                       </div>
                     </div>
                   )}
@@ -798,7 +823,7 @@ export default function HorizonChatView({
                     <div className="horizon-voice-note-card" style={{ marginBottom: '6px' }}>
                       <button
                         type="button"
-                        onClick={() => handleToggleVoicePlay(msg.id, msg.attachmentUrl)}
+                        onClick={() => handleToggleVoicePlay(msg.id, sanitizeMediaUrl(msg.attachmentUrl))}
                         className="horizon-voice-play-btn"
                         title={playingVoiceId === msg.id ? "Pause" : "Play voice note"}
                       >
@@ -824,7 +849,10 @@ export default function HorizonChatView({
                       style={{ marginBottom: '6px', borderRadius: '12px', overflow: 'hidden', cursor: 'pointer' }}
                       onClick={() => {
                         if (msg.attachmentUrl) {
-                          const url = msg.attachmentUrl.startsWith('http') ? msg.attachmentUrl : `${apiBaseUrl.replace(/\/$/, '')}/${msg.attachmentUrl.replace(/^\//, '')}`;
+                          const cleanUrl = sanitizeMediaUrl(msg.attachmentUrl);
+                          const url = (cleanUrl && (cleanUrl.startsWith('http') || cleanUrl.startsWith('data:') || cleanUrl.startsWith('blob:')))
+                            ? cleanUrl
+                            : `${apiBaseUrl.replace(/\/$/, '')}/${cleanUrl.replace(/^\//, '')}`;
                           setLightboxMedia({
                             type: 'VIDEO',
                             url,
@@ -837,7 +865,7 @@ export default function HorizonChatView({
                     >
                       {msg.attachmentUrl ? (
                         <video
-                          src={msg.attachmentUrl.startsWith('http') ? msg.attachmentUrl : `${apiBaseUrl.replace(/\/$/, '')}/${msg.attachmentUrl.replace(/^\//, '')}`}
+                          src={sanitizeMediaUrl(msg.attachmentUrl).startsWith('http') ? sanitizeMediaUrl(msg.attachmentUrl) : `${apiBaseUrl.replace(/\/$/, '')}/${sanitizeMediaUrl(msg.attachmentUrl).replace(/^\//, '')}`}
                           controls
                           preload="metadata"
                           playsInline
@@ -1263,10 +1291,15 @@ export default function HorizonChatView({
                   backgroundColor: '#000'
                 }}
               />
+            ) : failedImages[lightboxMedia.url] ? (
+              <div style={{ color: '#F8FAFC', padding: '40px', textAlign: 'center', fontSize: '15px' }}>
+                Unable to load full-size image.
+              </div>
             ) : (
               <img
                 src={lightboxMedia.url}
                 alt="Full size media"
+                onError={() => handleImageError(lightboxMedia.url)}
                 style={{
                   maxWidth: '100%',
                   maxHeight: '100%',
@@ -1374,8 +1407,13 @@ export default function HorizonChatView({
                     border: '2px solid var(--color-accent-amber)'
                   }}
                 >
-                  {partner.avatarUrl || partner.avatar_url ? (
-                    <img src={partner.avatarUrl || partner.avatar_url} alt={partner.username} className="horizon-avatar-img" />
+                  {(partner.avatarUrl || partner.avatar_url) && !failedImages[partner.avatarUrl || partner.avatar_url] ? (
+                    <img
+                      src={partner.avatarUrl || partner.avatar_url}
+                      alt={partner.username}
+                      className="horizon-avatar-img"
+                      onError={() => handleImageError(partner.avatarUrl || partner.avatar_url)}
+                    />
                   ) : (
                     (partner.username || 'User').slice(0, 2).toUpperCase()
                   )}
@@ -1487,6 +1525,7 @@ export default function HorizonChatView({
                             <img
                               src={m.attachmentUrl || m.thumbnailBlur}
                               alt="media thumbnail"
+                              onError={() => handleImageError(m.attachmentUrl || m.id)}
                               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             />
                           )}

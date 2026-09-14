@@ -144,13 +144,30 @@ class PhotoViewerActivity : AppCompatActivity() {
 
     private fun resolveMediaUrl(raw: String): String {
         if (raw.isBlank()) return ""
-        if (raw.startsWith("http://horizon-chat-1.onrender.com")) {
-            return raw.replace("http://", "https://")
+        var url = raw.trim()
+
+        // Handle markdown link: [url](url)/path or [text](url)
+        val mdRegex = Regex("""^\[.*?\]\((https?://[^\s\)]+)\)(.*)$""")
+        val match = mdRegex.find(url)
+        if (match != null) {
+            val base = match.groupValues[1].trimEnd('/')
+            val trailing = match.groupValues[2].trimStart('/')
+            url = if (trailing.isNotEmpty()) "$base/$trailing" else base
         }
-        if (raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("data:") || raw.startsWith("file://")) {
-            return raw
+
+        if (url.startsWith("/http://") || url.startsWith("/https://")) {
+            url = url.removePrefix("/")
         }
-        return "${com.chatapp.horizon.network.ApiClient.BASE_URL.trimEnd('/')}/${raw.trimStart('/')}"
+        if (url.startsWith("http://horizon-chat-1.onrender.com")) {
+            return url.replace("http://", "https://")
+        }
+        if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("file://")) {
+            return url
+        }
+        if (url.contains("r2.dev") || url.contains("r2.cloudflarestorage.com")) {
+            return "https://${url.trimStart('/')}"
+        }
+        return "${com.chatapp.horizon.network.ApiClient.BASE_URL.trimEnd('/')}/${url.trimStart('/')}"
     }
 
     private fun loadPhoto() {

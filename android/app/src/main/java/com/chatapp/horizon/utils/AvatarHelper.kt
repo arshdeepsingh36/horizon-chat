@@ -30,13 +30,30 @@ object AvatarHelper {
 
     fun resolveMediaUrl(rawUrl: String?): String? {
         if (rawUrl.isNullOrBlank()) return null
-        if (rawUrl.startsWith("http://horizon-chat-1.onrender.com")) {
-            return rawUrl.replace("http://", "https://")
+        var url = rawUrl.trim()
+
+        // Handle markdown link: [url](url)/path or [text](url)
+        val mdRegex = Regex("""^\[.*?\]\((https?://[^\s\)]+)\)(.*)$""")
+        val match = mdRegex.find(url)
+        if (match != null) {
+            val base = match.groupValues[1].trimEnd('/')
+            val trailing = match.groupValues[2].trimStart('/')
+            url = if (trailing.isNotEmpty()) "$base/$trailing" else base
         }
-        if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || rawUrl.startsWith("data:") || rawUrl.startsWith("file://")) {
-            return rawUrl
+
+        if (url.startsWith("/http://") || url.startsWith("/https://")) {
+            url = url.removePrefix("/")
         }
-        return "${ApiClient.BASE_URL.trimEnd('/')}/${rawUrl.trimStart('/')}"
+        if (url.startsWith("http://horizon-chat-1.onrender.com")) {
+            return url.replace("http://", "https://")
+        }
+        if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("file://")) {
+            return url
+        }
+        if (url.contains("r2.dev") || url.contains("r2.cloudflarestorage.com")) {
+            return "https://${url.trimStart('/')}"
+        }
+        return "${ApiClient.BASE_URL.trimEnd('/')}/${url.trimStart('/')}"
     }
 
     fun getInitials(name: String?): String {

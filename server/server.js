@@ -39,19 +39,21 @@ import {
   generatePresignedUploadUrl,
   getR2PublicUrl
 } from './r2.js';
-
-dotenv.config();
-
-const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'horizon_chat_secure_secret_2026_q4';
-
-
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+if (fs.existsSync(path.resolve(__dirname, '.env'))) {
+  dotenv.config({ path: path.resolve(__dirname, '.env') });
+} else {
+  dotenv.config();
+}
+
+const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'horizon_chat_secure_secret_2026_q4';
 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -548,16 +550,18 @@ app.post('/api/media/presign', authenticateToken, async (req, res) => {
 
     const serverHost = process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`;
     const cleanFileName = key.replace(/[^a-zA-Z0-9._-]/g, '_');
+    let uploadUrl = '';
+    let publicUrl = '';
 
-    if (r2Client && process.env.R2_BUCKET_NAME) {
-      const command = new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: key,
-        ContentType: contentType
+    const client = getR2Client();
+    if (client && isR2Configured()) {
+      const { uploadUrl: presignedUrl, publicUrl: generatedPublicUrl } = await generatePresignedUploadUrl({
+        key,
+        contentType,
+        expiresIn: 3600
       });
-      uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 3600 });
-      const publicBase = process.env.R2_PUBLIC_DOMAIN || `https://${process.env.R2_BUCKET_NAME}.r2.cloudflarestorage.com`;
-      publicUrl = `${publicBase}/${key}`;
+      uploadUrl = presignedUrl;
+      publicUrl = generatedPublicUrl;
     } else {
       // Direct Server Upload Receiver Fallback (Guaranteed Accessible URL)
       uploadUrl = `${serverHost}/api/media/mock-upload/${encodeURIComponent(cleanFileName)}`;
@@ -577,7 +581,7 @@ app.post('/api/media/presign', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('[PRESIGN ERROR]', err);
-    return res.status(500).json({ error: 'Failed to generate presigned upload URL' });
+    return res.status(500).json({ error: err.message || 'Failed to generate presigned upload URL' });
   }
 });
 

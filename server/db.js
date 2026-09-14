@@ -1,11 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import pg from 'pg';
 import sqlite3 from 'sqlite3';
+import { sanitizeMediaUrl } from './r2.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+if (fs.existsSync(path.resolve(__dirname, '.env'))) {
+  dotenv.config({ path: path.resolve(__dirname, '.env') });
+} else {
+  dotenv.config();
+}
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -13,177 +21,185 @@ let isPg = false;
 let pgPool = null;
 let sqliteDb = null;
 
-export async function initDb() {
-  if (DATABASE_URL) {
-    console.log('[DB] Connecting to PostgreSQL (Neon/External)...');
-    pgPool = new pg.Pool({
-      connectionString: DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000
-    });
-    isPg = true;
+async function initSqlite() {
+  console.log('[DB] Initializing local SQLite database...');
+  const dataDir = path.join(__dirname, 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  const dbPath = path.join(dataDir, 'horizon_chat.db');
 
-    // Accounts Table (TRD v2.0.0)
-    await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS accounts (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(32) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
-    `);
+  sqliteDb = new sqlite3.Database(dbPath);
+  isPg = false;
 
-    // Messages Table with Cursor Index (TRD v2.0.0)
-    await pgPool.query(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id BIGSERIAL PRIMARY KEY,
-        sender_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        recipient_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        message_text TEXT,
-        attachment_type VARCHAR(20) DEFAULT 'NONE',
-        attachment_url TEXT,
-        r2_key TEXT,
-        thumbnail_blur TEXT,
-        file_size_bytes BIGINT DEFAULT 0,
-        status VARCHAR(16) DEFAULT 'SENT',
-        is_view_once BOOLEAN DEFAULT FALSE,
-        is_viewed BOOLEAN DEFAULT FALSE,
-        reply_to_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_messages_pair_cursor 
-      ON messages(sender_id, recipient_id, id DESC);
+  await new Promise((resolve, reject) => {
+    sqliteDb.serialize(() => {
+      sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+          password_hash TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `, (err) => {
+        if (err) return reject(err);
+      });
 
-      -- Safe migrations for existing deployments
-      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
-      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS display_name TEXT;
-      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.';
-      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS r2_key TEXT;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions TEXT DEFAULT '{}';
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by_users TEXT DEFAULT '[]';
-      ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP WITH TIME ZONE;
+      sqliteDb.run(`
+        CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
+      `);
 
-      CREATE TABLE IF NOT EXISTS user_blocks (
-        id SERIAL PRIMARY KEY,
-        blocker_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        blocked_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (blocker_id, blocked_id)
-      );
+      sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sender_id INTEGER NOT NULL,
+          recipient_id INTEGER NOT NULL,
+          message_text TEXT,
+          attachment_type TEXT DEFAULT 'NONE',
+          attachment_url TEXT,
+          thumbnail_blur TEXT,
+          file_size_bytes INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'SENT',
+          reply_to_id INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
 
-      CREATE TABLE IF NOT EXISTS user_reports (
-        id SERIAL PRIMARY KEY,
-        reporter_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        reported_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        reason TEXT NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+      sqliteDb.run(`
+        CREATE INDEX IF NOT EXISTS idx_messages_pair_cursor 
+        ON messages(sender_id, recipient_id, id DESC);
+      `);
 
-    console.log('[DB] PostgreSQL initialized successfully (Phase 2b).');
-  } else {
-    console.log('[DB] DATABASE_URL not detected. Falling back to local SQLite...');
-    const dataDir = path.join(__dirname, 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    const dbPath = path.join(dataDir, 'horizon_chat.db');
+      // SQLite dynamic column migrations
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN avatar_url TEXT;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN display_name TEXT;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.';`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN last_seen DATETIME DEFAULT CURRENT_TIMESTAMP;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN r2_key TEXT;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '{}';`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN deleted_for_everyone INTEGER DEFAULT 0;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN deleted_by_users TEXT DEFAULT '[]';`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN read_at DATETIME;`, () => {});
 
-    sqliteDb = new sqlite3.Database(dbPath);
-    isPg = false;
+      sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS user_blocks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          blocker_id INTEGER NOT NULL,
+          blocked_id INTEGER NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(blocker_id, blocked_id)
+        );
+      `);
 
-    await new Promise((resolve, reject) => {
-      sqliteDb.serialize(() => {
-        sqliteDb.run(`
-          CREATE TABLE IF NOT EXISTS accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL COLLATE NOCASE,
-            password_hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          );
-        `, (err) => {
-          if (err) return reject(err);
-        });
-
-        sqliteDb.run(`
-          CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
-        `);
-
-        sqliteDb.run(`
-          CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id INTEGER NOT NULL,
-            recipient_id INTEGER NOT NULL,
-            message_text TEXT,
-            attachment_type TEXT DEFAULT 'NONE',
-            attachment_url TEXT,
-            thumbnail_blur TEXT,
-            file_size_bytes INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'SENT',
-            reply_to_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          );
-        `, (err) => {
-          if (err) return reject(err);
-        });
-
-        sqliteDb.run(`
-          CREATE INDEX IF NOT EXISTS idx_messages_pair_cursor 
-          ON messages(sender_id, recipient_id, id DESC);
-        `, (err) => {
-          if (err) return reject(err);
-          // Safe SQLite column additions (SQLite cannot use non-constant defaults like CURRENT_TIMESTAMP in ALTER TABLE)
-          sqliteDb.serialize(() => {
-            const tryAdd = (sql) => sqliteDb.run(sql, () => {});
-            tryAdd("ALTER TABLE accounts ADD COLUMN avatar_url TEXT");
-            tryAdd("ALTER TABLE accounts ADD COLUMN display_name TEXT");
-            tryAdd("ALTER TABLE accounts ADD COLUMN bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.'");
-            tryAdd("ALTER TABLE accounts ADD COLUMN last_seen DATETIME");
-            tryAdd("ALTER TABLE messages ADD COLUMN is_view_once INTEGER DEFAULT 0");
-            tryAdd("ALTER TABLE messages ADD COLUMN is_viewed INTEGER DEFAULT 0");
-            tryAdd("ALTER TABLE messages ADD COLUMN read_at DATETIME");
-            tryAdd("ALTER TABLE messages ADD COLUMN r2_key TEXT");
-            tryAdd("ALTER TABLE messages ADD COLUMN reactions TEXT DEFAULT '{}'");
-            tryAdd("ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0");
-            tryAdd("ALTER TABLE messages ADD COLUMN deleted_for_everyone INTEGER DEFAULT 0");
-            tryAdd("ALTER TABLE messages ADD COLUMN deleted_by_users TEXT DEFAULT '[]'");
-
-            sqliteDb.run(`
-              CREATE TABLE IF NOT EXISTS user_blocks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                blocker_id INTEGER NOT NULL,
-                blocked_id INTEGER NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (blocker_id, blocked_id)
-              );
-            `, () => {});
-
-            sqliteDb.run(`
-              CREATE TABLE IF NOT EXISTS user_reports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                reporter_id INTEGER NOT NULL,
-                reported_id INTEGER NOT NULL,
-                reason TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-              );
-            `, (err) => {
-              if (err) return reject(err);
-              resolve();
-            });
-          });
-        });
+      sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS user_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          reporter_id INTEGER NOT NULL,
+          reported_id INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `, () => {
+        resolve();
       });
     });
-    console.log('[DB] SQLite initialized at ' + dbPath + ' (Phase 2b).');
+  });
+
+  console.log('[DB] SQLite initialized at ' + dbPath + ' (Phase 2b).');
+}
+
+export async function initDb() {
+  const isSampleNeonUrl = !DATABASE_URL || DATABASE_URL.includes('username:password') || DATABASE_URL.includes('ep-sample-123456');
+  if (DATABASE_URL && !isSampleNeonUrl) {
+    try {
+      console.log('[DB] Connecting to PostgreSQL (Neon/External)...');
+      pgPool = new pg.Pool({
+        connectionString: DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000
+      });
+
+      // Test connection
+      await pgPool.query('SELECT 1');
+      isPg = true;
+
+      // Accounts Table (TRD v2.0.0)
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS accounts (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(32) UNIQUE NOT NULL,
+          password_hash VARCHAR(255) NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username);
+      `);
+
+      // Messages Table with Cursor Index (TRD v2.0.0)
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id BIGSERIAL PRIMARY KEY,
+          sender_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          recipient_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          message_text TEXT,
+          attachment_type VARCHAR(20) DEFAULT 'NONE',
+          attachment_url TEXT,
+          r2_key TEXT,
+          thumbnail_blur TEXT,
+          file_size_bytes BIGINT DEFAULT 0,
+          status VARCHAR(16) DEFAULT 'SENT',
+          is_view_once BOOLEAN DEFAULT FALSE,
+          is_viewed BOOLEAN DEFAULT FALSE,
+          reply_to_id BIGINT REFERENCES messages(id) ON DELETE SET NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_pair_cursor 
+        ON messages(sender_id, recipient_id, id DESC);
+
+        -- Safe migrations for existing deployments
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS display_name TEXT;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bio_status TEXT DEFAULT 'Hey there! I am using Horizon Chat.';
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS r2_key TEXT;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions TEXT DEFAULT '{}';
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by_users TEXT DEFAULT '[]';
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP WITH TIME ZONE;
+
+        CREATE TABLE IF NOT EXISTS user_blocks (
+          id SERIAL PRIMARY KEY,
+          blocker_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          blocked_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (blocker_id, blocked_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS user_reports (
+          id SERIAL PRIMARY KEY,
+          reporter_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          reported_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          reason TEXT NOT NULL,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      console.log('[DB] PostgreSQL initialized successfully (Phase 2b).');
+      return;
+    } catch (err) {
+      console.warn('[DB] PostgreSQL connection failed, falling back to SQLite:', err.message);
+      pgPool = null;
+    }
   }
+
+  await initSqlite();
 }
 
 // User Methods
@@ -387,6 +403,7 @@ export async function clearConversationMessages(userId, partnerId) {
 }
 
 export async function updateUserProfile(userId, { displayName, bioStatus, avatarUrl }) {
+  const cleanAvatar = avatarUrl !== undefined ? (avatarUrl ? sanitizeMediaUrl(avatarUrl) : null) : undefined;
   if (isPg) {
     const res = await pgPool.query(
       `UPDATE accounts 
@@ -395,7 +412,7 @@ export async function updateUserProfile(userId, { displayName, bioStatus, avatar
            avatar_url = COALESCE($3, avatar_url)
        WHERE id = $4
        RETURNING id, username, display_name, bio_status, avatar_url`,
-      [displayName, bioStatus, avatarUrl, userId]
+      [displayName, bioStatus, cleanAvatar, userId]
     );
     return res.rows[0] || null;
   } else {
@@ -406,7 +423,7 @@ export async function updateUserProfile(userId, { displayName, bioStatus, avatar
              bio_status = COALESCE(?, bio_status),
              avatar_url = COALESCE(?, avatar_url)
          WHERE id = ?`,
-        [displayName, bioStatus, avatarUrl, userId],
+        [displayName, bioStatus, cleanAvatar, userId],
         function (err) {
           if (err) return reject(err);
           sqliteDb.get(
@@ -475,7 +492,7 @@ function formatMessage(r) {
 
   const displayText = deletedForEveryone ? '🚫 This message was deleted' : rawText;
   const displayAttachmentType = deletedForEveryone ? 'NONE' : attachmentType;
-  const displayAttachmentUrl = deletedForEveryone ? null : attachmentUrl;
+  const displayAttachmentUrl = deletedForEveryone ? null : (attachmentUrl ? sanitizeMediaUrl(attachmentUrl) : null);
   const r2Key = r.r2_key ?? r.r2Key ?? null;
   const displayR2Key = deletedForEveryone ? null : r2Key;
   const displayThumbnailBlur = deletedForEveryone ? null : thumbnailBlur;
@@ -610,7 +627,8 @@ export async function saveMessageTRD({
   isViewOnce = false,
   replyToId = null 
 }) {
-  const finalAttachmentUrl = mediaUrl || attachmentUrl;
+  const rawAttachment = mediaUrl || attachmentUrl;
+  const finalAttachmentUrl = rawAttachment ? sanitizeMediaUrl(rawAttachment) : null;
   const finalR2Key = r2Key || r2_key || null;
 
   if (isPg) {
