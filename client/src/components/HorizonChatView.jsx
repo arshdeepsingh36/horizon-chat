@@ -29,7 +29,8 @@ import { uploadToR2 } from '../utils/r2Upload';
 // Helper to normalize message objects across snake_case and camelCase
 function normalizeMsg(m) {
   if (!m) return null;
-  const id = Number(m.id);
+  const id = Number(m.id) || m.id;
+  const tempId = m.tempId || m.localClientId || m.clientSideId || null;
   const senderId = Number(m.senderId ?? m.sender_id);
   const recipientId = Number(m.recipientId ?? m.recipient_id);
   const text = m.text ?? m.message_text ?? m.messageText ?? '';
@@ -46,6 +47,7 @@ function normalizeMsg(m) {
 
   return {
     id,
+    tempId,
     senderId,
     recipientId,
     text,
@@ -207,6 +209,31 @@ export default function HorizonChatView({
     }
   }, [loadingInitial, messages.length]);
 
+  // Room Subscription & Re-emit on Reconnection for Reliability (Issue 2)
+  useEffect(() => {
+    if (!socket || !partner?.id) return;
+
+    const emitJoinRoom = () => {
+      const convRoom = `chat_${Math.min(Number(user.id), Number(partner.id))}_${Math.max(Number(user.id), Number(partner.id))}`;
+      socket.emit('join_room', {
+        partnerId: partner.id,
+        roomId: convRoom
+      });
+      socket.emit('join', convRoom);
+    };
+
+    emitJoinRoom();
+    socket.on('connect', emitJoinRoom);
+    socket.on('reconnect', emitJoinRoom);
+    socket.io?.on('reconnect', emitJoinRoom);
+
+    return () => {
+      socket.off('connect', emitJoinRoom);
+      socket.off('reconnect', emitJoinRoom);
+      socket.io?.off('reconnect', emitJoinRoom);
+    };
+  }, [socket, partner?.id, user?.id]);
+
   // 2. Socket Listeners for Real-Time Messages and Read Receipts
   useEffect(() => {
     if (!socket) return;
@@ -219,7 +246,7 @@ export default function HorizonChatView({
       if (msg.senderId === partner.id) {
         setMessages((prev) => {
           // Guard against duplicates
-          if (prev.some((m) => m.id === msg.id)) return prev;
+          if (prev.some((m) => m.id === msg.id || (msg.tempId && m.tempId === msg.tempId))) return prev;
           return [...prev, msg];
         });
 
@@ -235,6 +262,18 @@ export default function HorizonChatView({
             });
           }
         }, 50);
+      } else if (msg.senderId === Number(user.id)) {
+        // Multi-device sync or sender broadcast: reconcile with optimistic bubble
+        setMessages((prev) => {
+          const index = prev.findIndex((m) => (msg.tempId && m.tempId === msg.tempId) || m.id === msg.id);
+          if (index !== -1) {
+            const next = [...prev];
+            next[index] = msg;
+            return next;
+          }
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
       }
     };
 
@@ -268,7 +307,7 @@ export default function HorizonChatView({
       socket.off('user_status_changed', handleStatusChanged);
       socket.off('media_viewed', handleMediaViewed);
     };
-  }, [socket, partner.id]);
+  }, [socket, partner?.id, user?.id]);
 
   // 3. Reverse Cursor Pagination: Fetch older messages when scrolling to top
   const handleScroll = async (e) => {
@@ -310,7 +349,7 @@ export default function HorizonChatView({
     }
   };
 
-  // 4. Send Text Message
+  // 4. Send Text Message (with tempId reconciliation)
   const handleSendMessage = (e) => {
     e?.preventDefault();
     const text = inputText.trim();
@@ -318,9 +357,10 @@ export default function HorizonChatView({
 
     setInputText('');
 
-    const optimisticId = Date.now();
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const optimisticMsg = {
-      id: optimisticId,
+      id: tempId,
+      tempId,
       senderId: Number(user.id),
       recipientId: Number(partner.id),
       text,
@@ -342,19 +382,20 @@ export default function HorizonChatView({
       }
     }, 20);
 
-    // Socket emit with ACK callback
+    // Socket emit with ACK callback and tempId
     socket.emit(
       'send_message',
       {
         recipientId: partner.id,
         text,
-        attachmentType: 'NONE'
+        attachmentType: 'NONE',
+        tempId
       },
       (response) => {
         if (response?.success && response.message) {
           const saved = normalizeMsg(response.message);
           setMessages((prev) =>
-            prev.map((m) => (m.id === optimisticId ? saved : m))
+            prev.map((m) => ((m.tempId && m.tempId === tempId) || m.id === tempId ? saved : m))
           );
           if (onMessageSent) onMessageSent();
         }
@@ -362,12 +403,12 @@ export default function HorizonChatView({
     );
   };
 
-  // 5. Cloudflare R2 Direct Binary Upload Pipeline
+  // 5. Cloudflare R2 Direct Binary Upload Pipeline (with compression & tempId reconciliation)
   const handleUploadAndSendMedia = async (file, category, attachmentType, viewOnce = isViewOnceSelected) => {
     if (!file || !socket) return;
     setUploadingMedia(true);
 
-    const optimisticId = Date.now();
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     let localPreviewUrl = null;
     try {
       if (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/'))) {
@@ -378,7 +419,8 @@ export default function HorizonChatView({
     }
 
     const optimisticMsg = {
-      id: optimisticId,
+      id: tempId,
+      tempId,
       senderId: Number(user.id),
       recipientId: Number(partner.id),
       text: file.name || (attachmentType === 'VIDEO' ? 'Video' : (attachmentType === 'AUDIO' ? 'Voice Note' : 'Attachment')),
@@ -399,8 +441,8 @@ export default function HorizonChatView({
     }, 20);
 
     try {
-      // Direct binary PUT upload to Cloudflare R2
-      const { publicUrl, key } = await uploadToR2({
+      // Direct binary PUT upload to Cloudflare R2 (compressed images)
+      const { publicUrl, key, fileSize } = await uploadToR2({
         file,
         uploadType: 'chat_media',
         recipientUsername: partner.username,
@@ -419,14 +461,15 @@ export default function HorizonChatView({
           attachmentUrl: publicUrl,
           mediaUrl: publicUrl,
           r2Key: key,
-          fileSizeBytes: file.size || 0,
-          isViewOnce: Boolean(viewOnce)
+          fileSizeBytes: fileSize || file.size || 0,
+          isViewOnce: Boolean(viewOnce),
+          tempId
         },
         (response) => {
           if (response?.success && response.message) {
             const saved = normalizeMsg(response.message);
             setMessages((prev) =>
-              prev.map((m) => (m.id === optimisticId ? saved : m))
+              prev.map((m) => ((m.tempId && m.tempId === tempId) || m.id === tempId ? saved : m))
             );
             if (onMessageSent) onMessageSent();
           }
@@ -435,7 +478,7 @@ export default function HorizonChatView({
     } catch (err) {
       console.error('[R2 DIRECT UPLOAD ERROR]', err);
       setMessages((prev) =>
-        prev.map((m) => (m.id === optimisticId ? { ...m, text: `${m.text} (Upload failed)`, pending: false } : m))
+        prev.map((m) => ((m.tempId && m.tempId === tempId) || m.id === tempId ? { ...m, text: `${m.text} (Upload failed)`, pending: false } : m))
       );
     } finally {
       setUploadingMedia(false);
@@ -796,6 +839,7 @@ export default function HorizonChatView({
                         <video
                           src={msg.attachmentUrl.startsWith('http') ? msg.attachmentUrl : `${apiBaseUrl.replace(/\/$/, '')}/${msg.attachmentUrl.replace(/^\//, '')}`}
                           controls
+                          preload="metadata"
                           playsInline
                           style={{ width: '100%', maxHeight: '240px', borderRadius: '12px', display: 'block', backgroundColor: '#000' }}
                           poster={msg.thumbnailBlur || undefined}
@@ -1085,17 +1129,21 @@ export default function HorizonChatView({
         )}
       </form>
 
-      {/* Full-Screen Interactive Player & Photo Viewer Modal */}
+      {/* Full-Screen Interactive Player & Photo Viewer Modal (Orientation Respecting Fixed Overlay) */}
       {lightboxMedia && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 9999,
+            width: '100vw',
+            height: '100dvh',
+            zIndex: 99999,
             backgroundColor: '#000000',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            overflow: 'hidden',
+            touchAction: 'pan-y'
           }}
         >
           {/* Top Bar */}
@@ -1205,6 +1253,7 @@ export default function HorizonChatView({
                 src={lightboxMedia.url}
                 controls
                 autoPlay
+                preload="metadata"
                 playsInline
                 style={{
                   maxWidth: '100%',

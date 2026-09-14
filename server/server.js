@@ -63,7 +63,7 @@ const server = http.createServer(app);
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT'] }));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
-app.use('/uploads', express.static(uploadsDir));
+app.use('/uploads', express.static(uploadsDir, { acceptRanges: true }));
 
 // In-Memory Socket Map: userId (Int) -> Set<socket.id>
 const onlineUsers = new Map();
@@ -634,12 +634,31 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('user_status_change', { userId, status: 'online' });
   }
   onlineUsers.get(userId).add(socket.id);
+  socket.join(`user_${userId}`);
 
   socket.emit('connection_ack', {
     status: 'connected',
     userId,
     username: socket.user.username,
     socketId: socket.id
+  });
+
+  // Room subscriptions for reliability
+  socket.on('join_user', ({ userId: uid }) => {
+    const targetId = uid || userId;
+    socket.join(`user_${targetId}`);
+  });
+
+  socket.on('join_room', ({ roomId, partnerId: pId }) => {
+    if (roomId) socket.join(roomId);
+    if (pId) {
+      const convRoom = `chat_${Math.min(userId, Number(pId))}_${Math.max(userId, Number(pId))}`;
+      socket.join(convRoom);
+    }
+  });
+
+  socket.on('join', (room) => {
+    if (room) socket.join(room);
   });
 
   // Handle Send Message (TRD Section 4.2 & Phase 2)
@@ -655,7 +674,8 @@ io.on('connection', (socket) => {
       thumbnailBlur = null,
       fileSizeBytes = 0,
       isViewOnce = false,
-      replyToId = null
+      replyToId = null,
+      tempId = null
     } = payload || {};
 
     const rId = Number(recipientId);
@@ -727,9 +747,11 @@ io.on('connection', (socket) => {
         replyToId
       });
 
-      // 2. Server calls client acknowledgement callback with ID
+      const messageWithTempId = { ...savedRecord, tempId };
+
+      // 2. Server calls client acknowledgement callback with ID and tempId for optimistic reconciliation
       if (typeof callback === 'function') {
-        callback({ success: true, message: savedRecord });
+        callback({ success: true, message: messageWithTempId });
       }
 
       // 3. Emit new_message to recipient sockets
@@ -740,12 +762,12 @@ io.on('connection', (socket) => {
         });
       }
 
-      // 4. Also emit to sender's other sockets (multi-device sync)
+      // 4. Emit to sender's other sockets only (multi-device sync) - NOT to originating socket
       const senderSockets = onlineUsers.get(userId);
       if (senderSockets) {
         senderSockets.forEach(sockId => {
           if (sockId !== socket.id) {
-            io.to(sockId).emit('new_message', savedRecord);
+            io.to(sockId).emit('new_message', messageWithTempId);
           }
         });
       }

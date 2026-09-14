@@ -1,10 +1,13 @@
+import imageCompression from 'browser-image-compression';
+
 /**
  * Direct Cloudflare R2 Upload Helper (Zero-Cost Egress & Direct Binary Pipeline)
  * 
  * Flow:
- * 1. Request presigned upload URL from backend /api/upload/presigned-url
- * 2. Upload raw binary/blob directly to Cloudflare R2 endpoint via HTTP PUT
- * 3. Return the public URL and R2 key
+ * 1. Compress image client-side if image (WebP 512x512 quality 0.85 for avatars, 1920x1080 <1MB for chat)
+ * 2. Request presigned upload URL from backend /api/upload/presigned-url
+ * 3. Upload raw binary/blob directly to Cloudflare R2 endpoint via HTTP PUT
+ * 4. Return the public URL and R2 key
  */
 
 export async function uploadToR2({
@@ -19,8 +22,44 @@ export async function uploadToR2({
 }) {
   if (!file) throw new Error('No file provided for upload.');
 
-  const fileName = file.name || `media_${Date.now()}`;
-  const contentType = file.type || 'application/octet-stream';
+  let fileToUpload = file;
+  let fileName = file.name || `media_${Date.now()}`;
+  let contentType = file.type || 'application/octet-stream';
+
+  // Client-Side Image Compression using browser-image-compression
+  const isImage = (file.type && file.type.startsWith('image/')) || mediaType === 'image' || uploadType === 'pfp';
+  if (isImage && typeof window !== 'undefined') {
+    try {
+      if (uploadType === 'pfp' || mediaType === 'pfp') {
+        // High-Quality Profile Picture: WebP at max 512x512 with quality ~0.85
+        const pfpOptions = {
+          maxSizeMB: 1,
+          maxWidthOrHeight: 512,
+          fileType: 'image/webp',
+          initialQuality: 0.85,
+          useWebWorker: true
+        };
+        const compressedBlob = await imageCompression(file, pfpOptions);
+        const nameWithoutExt = fileName.replace(/\.[^/.]+$/, '');
+        fileName = `${nameWithoutExt || 'pfp'}.webp`;
+        contentType = 'image/webp';
+        fileToUpload = new File([compressedBlob], fileName, { type: 'image/webp' });
+      } else {
+        // Chat Images: Cap dimensions at 1920x1080 and target size under 1MB
+        const chatOptions = {
+          maxSizeMB: 1,
+          maxWidthOrHeight: 1920,
+          initialQuality: 0.85,
+          useWebWorker: true
+        };
+        const compressedBlob = await imageCompression(file, chatOptions);
+        contentType = compressedBlob.type || file.type || 'image/jpeg';
+        fileToUpload = new File([compressedBlob], fileName, { type: contentType });
+      }
+    } catch (compressionError) {
+      console.warn('[IMAGE COMPRESSION] Compression skipped or failed, using original file:', compressionError);
+    }
+  }
 
   // 1. Request signed upload URL from server
   const presignRes = await fetch(`${apiBaseUrl}/api/upload/presigned-url`, {
@@ -35,6 +74,7 @@ export async function uploadToR2({
       mediaType,
       fileName,
       contentType,
+      fileSizeBytes: fileToUpload.size,
       isViewOnce
     })
   });
@@ -56,7 +96,7 @@ export async function uploadToR2({
     headers: {
       'Content-Type': contentType
     },
-    body: file
+    body: fileToUpload
   });
 
   if (!uploadRes.ok) {
@@ -68,7 +108,7 @@ export async function uploadToR2({
     key,
     fileName,
     contentType,
-    fileSize: file.size
+    fileSize: fileToUpload.size
   };
 }
 

@@ -55,12 +55,22 @@ export default function App() {
 
     const s = io(apiBaseUrl, {
       auth: { token },
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000
     });
 
-    s.on('connect', () => {
-      console.log(`[HORIZON SOCKET] Connected as @${user.username} (ID: ${user.id})`);
-    });
+    const handleRoomJoin = () => {
+      console.log(`[HORIZON SOCKET] Connected/Reconnected as @${user.username} (ID: ${user.id})`);
+      s.emit('join_user', { userId: user.id });
+      s.emit('join', `user_${user.id}`);
+    };
+
+    s.on('connect', handleRoomJoin);
+    s.on('reconnect', handleRoomJoin);
+    s.io?.on('reconnect', handleRoomJoin);
 
     // Real-time message receiver for dashboard updates
     s.on('new_message', (msg) => {
