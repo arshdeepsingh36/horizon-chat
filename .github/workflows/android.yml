@@ -62,6 +62,7 @@ jobs:
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         with:
           tag_name: ${{ (github.ref_type == 'tag' && github.ref_name) || 'v3.2.0' }}
           name: "Horizon Chat v3.2.0 Release"
@@ -76,5 +77,7 @@ jobs:
             - **Socket Reconnection Enhancements**: Aggressive exponential retry policy and automatic conversation room rejoining.
           files: |
             /tmp/dist/*.apk
+          make_latest: true
           token: ${{ secrets.GITHUB_TOKEN }}
+
 
