@@ -43,16 +43,21 @@ jobs:
           EOF
           chmod +x gradlew
 
-      - name: Build Debug APK
+      - name: Build Android APKs (Release & Debug)
         working-directory: ./android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
 
       - name: Prepare Distribution Files
         run: |
           mkdir -p /tmp/dist
-          cp android/app/build/outputs/apk/debug/*.apk /tmp/dist/app-debug.apk
-          cp /tmp/dist/app-debug.apk /tmp/dist/horizon-chat-v3.1.0.apk
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk /tmp/dist/app-release.apk
+            cp android/app/build/outputs/apk/release/app-release.apk /tmp/dist/horizon-chat-v3.2.0.apk
+          fi
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/dist/app-debug.apk
+          fi
           ls -la /tmp/dist/
 
       - name: Upload APK Artifact
@@ -65,11 +70,18 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ (github.ref_type == 'tag' && github.ref_name) || 'v3.1.0' }}
-          name: "Horizon Chat v3.1.0 Release"
-          body: "Horizon Chat v3.1.0 - Android R2 direct upload pipeline, user namespacing, strict Content-Type headers, persistent authentication, live chat, and audio voice notes."
+          tag_name: ${{ (github.ref_type == 'tag' && github.ref_name) || 'v3.2.0' }}
+          name: "Horizon Chat v3.2.0 Release"
+          body: |
+            ## Horizon Chat v3.2.0 Release
+            
+            ### ✨ What's New:
+            - **Real-Time Delivery Receipts & Ticks**: Instant double-tick delivery acknowledgments (`mark_delivered`) across Web & Mobile.
+            - **Foreground Silent Sync**: Automatically catches missed messages when app/tab regains focus or reconnects.
+            - **Time-Limited 'Delete for Everyone'**: Enforces 60m creation and 7m seen deadlines with server-side validation and clean text erasure.
+            - **Web & Mobile Push Notifications**: Background notifications via Web Push & push token registration.
+            - **Socket Reconnection Enhancements**: Aggressive exponential retry policy and automatic conversation room rejoining.
           files: |
-            /tmp/dist/app-debug.apk
-            /tmp/dist/horizon-chat-v3.1.0.apk
+            /tmp/dist/*.apk
           token: ${{ secrets.GITHUB_TOKEN }}
 
