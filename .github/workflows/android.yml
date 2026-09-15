@@ -29,22 +29,15 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle Wrapper
+      - name: Grant Execute Permission to Gradle Wrapper
         working-directory: ./android
-        run: |
-          cat << 'EOF' > gradlew
-          #!/usr/bin/env sh
-          APP_HOME=$(cd "`dirname "$0"`" && pwd -P)
-          CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
-          exec java -Dorg.gradle.appname=gradlew -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
-          EOF
-          chmod +x gradlew
+        run: chmod +x gradlew
 
       - name: Build Android APKs (Release & Debug)
         working-directory: ./android
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
           ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
 
