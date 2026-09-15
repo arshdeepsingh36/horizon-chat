@@ -112,6 +112,26 @@ interface ApiService {
         @Header("Authorization") token: String,
         @Body request: ReportRequest
     ): Response<GenericResponse>
+
+    @GET("api/messages/sync")
+    suspend fun syncMessages(
+        @Header("Authorization") token: String,
+        @Query("targetUserId") targetUserId: Int? = null,
+        @Query("sinceId") sinceId: Long? = null
+    ): Response<List<ChatMessage>>
+
+    @HTTP(method = "DELETE", path = "api/messages/{id}", hasBody = true)
+    suspend fun deleteMessage(
+        @Header("Authorization") token: String,
+        @Path("id") messageId: Long,
+        @Body request: Map<String, Any>
+    ): Response<GenericResponse>
+
+    @POST("api/notifications/register-token")
+    suspend fun registerPushToken(
+        @Header("Authorization") token: String,
+        @Body request: Map<String, String>
+    ): Response<GenericResponse>
 }
 
 object ApiClient {

@@ -102,6 +102,18 @@ async function initSqlite() {
           reason TEXT NOT NULL,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+      `);
+
+      sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS user_push_tokens (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          token TEXT NOT NULL,
+          device_type TEXT DEFAULT 'web',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(user_id, token)
+        );
       `, () => {
         resolve();
       });
@@ -189,6 +201,18 @@ export async function initDb() {
           reason TEXT NOT NULL,
           created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS user_push_tokens (
+          id SERIAL PRIMARY KEY,
+          user_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          token TEXT NOT NULL,
+          device_type VARCHAR(20) DEFAULT 'web',
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (user_id, token)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON user_push_tokens(user_id);
       `);
 
       console.log('[DB] PostgreSQL initialized successfully (Phase 2b).');
@@ -490,7 +514,7 @@ function formatMessage(r) {
     deletedByUsers = [];
   }
 
-  const displayText = deletedForEveryone ? '🚫 This message was deleted' : rawText;
+  const displayText = deletedForEveryone ? 'This message was deleted' : rawText;
   const displayAttachmentType = deletedForEveryone ? 'NONE' : attachmentType;
   const displayAttachmentUrl = deletedForEveryone ? null : (attachmentUrl ? sanitizeMediaUrl(attachmentUrl) : null);
   const r2Key = r.r2_key ?? r.r2Key ?? null;
@@ -684,11 +708,19 @@ export async function markMediaViewed(messageId) {
 
 export async function updateMessageStatus(messageId, status) {
   if (isPg) {
+    let res;
     if (status === 'READ') {
-      await pgPool.query("UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = $1", [messageId]);
+      res = await pgPool.query(
+        "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = $1 RETURNING *",
+        [messageId]
+      );
     } else {
-      await pgPool.query('UPDATE messages SET status = $1 WHERE id = $2', [status, messageId]);
+      res = await pgPool.query(
+        "UPDATE messages SET status = $1 WHERE id = $2 RETURNING *",
+        [status, messageId]
+      );
     }
+    return res.rows[0] ? formatMessage(res.rows[0]) : null;
   } else {
     return new Promise((resolve, reject) => {
       const sql = status === 'READ'
@@ -698,7 +730,10 @@ export async function updateMessageStatus(messageId, status) {
       if (status !== 'READ') params.unshift(status);
       sqliteDb.run(sql, params, (err) => {
         if (err) return reject(err);
-        resolve();
+        sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
+          if (err2) return reject(err2);
+          resolve(row ? formatMessage(row) : null);
+        });
       });
     });
   }
@@ -863,6 +898,17 @@ export async function toggleMessageReaction(messageId, userId, emoji) {
   }
 }
 
+function parseDbTimestamp(ts) {
+  if (!ts) return null;
+  if (ts instanceof Date) return ts.getTime();
+  const str = String(ts);
+  if (str.endsWith('Z') || str.includes('+')) {
+    return new Date(str).getTime();
+  }
+  // SQLite "YYYY-MM-DD HH:MM:SS" is stored in UTC
+  return new Date(str.replace(' ', 'T') + 'Z').getTime();
+}
+
 export async function deleteMessage(messageId, userId, mode = 'me') {
   let messageRow;
   if (isPg) {
@@ -881,21 +927,71 @@ export async function deleteMessage(messageId, userId, mode = 'me') {
   const uId = Number(userId);
 
   if (mode === 'everyone') {
+    // 1. Only sender can delete for everyone
+    const senderId = Number(messageRow.sender_id ?? messageRow.senderId);
+    if (senderId !== uId) {
+      const err = new Error('Only the message sender can delete this message for everyone');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // 2. Validate time elapsed since sent (within 60 minutes)
+    const createdAtMs = parseDbTimestamp(messageRow.created_at ?? messageRow.createdAt);
+    const now = Date.now();
+    if (createdAtMs && (now - createdAtMs > 60 * 60 * 1000)) {
+      const err = new Error('Delete for everyone is only allowed within 60 minutes of sending');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // 3. If seen (read_at is not null), validate time elapsed since seen (within 7 minutes)
+    const readAt = messageRow.read_at ?? messageRow.readAt;
+    if (readAt) {
+      const readAtMs = parseDbTimestamp(readAt);
+      if (readAtMs && (now - readAtMs > 7 * 60 * 1000)) {
+        const err = new Error('Delete for everyone is only allowed within 7 minutes of the message being seen');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    // 4. Update message in DB: text = 'This message was deleted', wipe attachments
     if (isPg) {
       const res = await pgPool.query(
-        'UPDATE messages SET deleted_for_everyone = TRUE, message_text = $1 WHERE id = $2 RETURNING *',
-        ['🚫 This message was deleted', messageId]
+        `UPDATE messages 
+         SET deleted_for_everyone = TRUE, 
+             message_text = $1, 
+             attachment_type = 'NONE', 
+             attachment_url = NULL, 
+             r2_key = NULL, 
+             thumbnail_blur = NULL, 
+             file_size_bytes = 0 
+         WHERE id = $2 
+         RETURNING *`,
+        ['This message was deleted', messageId]
       );
       return formatMessage(res.rows[0]);
     } else {
       return new Promise((resolve, reject) => {
-        sqliteDb.run('UPDATE messages SET deleted_for_everyone = 1, message_text = ? WHERE id = ?', ['🚫 This message was deleted', messageId], function(err) {
-          if (err) return reject(err);
-          sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
-            if (err2) return reject(err2);
-            resolve(formatMessage(row));
-          });
-        });
+        sqliteDb.run(
+          `UPDATE messages 
+           SET deleted_for_everyone = 1, 
+               message_text = ?, 
+               attachment_type = 'NONE', 
+               attachment_url = NULL, 
+               r2_key = NULL, 
+               thumbnail_blur = NULL, 
+               file_size_bytes = 0 
+           WHERE id = ?`,
+          ['This message was deleted', messageId],
+          function(err) {
+            if (err) return reject(err);
+            sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
+              if (err2) return reject(err2);
+              resolve(formatMessage(row));
+            });
+          }
+        );
       });
     }
   } else {
@@ -1001,4 +1097,131 @@ export async function deleteExpiredSeenMessages() {
     return 0;
   }
 }
+
+// Push Token Management (Web & Mobile Push)
+export async function savePushToken(userId, token, deviceType = 'web') {
+  const uId = Number(userId);
+  const tokenStr = typeof token === 'object' ? JSON.stringify(token) : String(token);
+  if (isPg) {
+    await pgPool.query(
+      `INSERT INTO user_push_tokens (user_id, token, device_type, updated_at)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id, token) 
+       DO UPDATE SET device_type = EXCLUDED.device_type, updated_at = CURRENT_TIMESTAMP`,
+      [uId, tokenStr, deviceType]
+    );
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        `INSERT INTO user_push_tokens (user_id, token, device_type, updated_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT (user_id, token)
+         DO UPDATE SET device_type = excluded.device_type, updated_at = datetime('now')`,
+        [uId, tokenStr, deviceType],
+        (err) => {
+          if (err) return reject(err);
+          resolve();
+        }
+      );
+    });
+  }
+}
+
+export async function deletePushToken(userId, token) {
+  const uId = Number(userId);
+  const tokenStr = typeof token === 'object' ? JSON.stringify(token) : String(token);
+  if (isPg) {
+    await pgPool.query('DELETE FROM user_push_tokens WHERE user_id = $1 AND token = $2', [uId, tokenStr]);
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run('DELETE FROM user_push_tokens WHERE user_id = ? AND token = ?', [uId, tokenStr], (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  }
+}
+
+export async function getPushTokensByUserId(userId) {
+  const uId = Number(userId);
+  if (isPg) {
+    const res = await pgPool.query('SELECT * FROM user_push_tokens WHERE user_id = $1', [uId]);
+    return res.rows;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.all('SELECT * FROM user_push_tokens WHERE user_id = ?', [uId], (err, rows) => {
+        if (err) return reject(err);
+        resolve(rows || []);
+      });
+    });
+  }
+}
+
+// Foreground / Reconnect Message Sync
+export async function getUnreadOrRecentMessages(currentUserId, targetUserId = null, sinceId = null) {
+  const uId = Number(currentUserId);
+  const tId = targetUserId ? Number(targetUserId) : null;
+  const sId = sinceId ? Number(sinceId) : null;
+
+  if (isPg) {
+    let sql = `
+      SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+      FROM messages
+      WHERE (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
+    `;
+    const params = [];
+    if (tId) {
+      params.push(uId, tId);
+      sql += ` AND ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))`;
+    } else {
+      params.push(uId);
+      sql += ` AND (recipient_id = $1 OR sender_id = $1)`;
+    }
+    if (sId) {
+      params.push(sId);
+      sql += ` AND id > $${params.length}`;
+    } else if (!tId) {
+      sql += ` AND recipient_id = $1 AND (status != 'READ' OR read_at IS NULL)`;
+    }
+    sql += ` ORDER BY id ASC LIMIT 100`;
+
+    const res = await pgPool.query(sql, params);
+    return res.rows
+      .map(formatMessage)
+      .filter(m => !m.deletedByUsers.includes(uId));
+  } else {
+    let sql = `
+      SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+      FROM messages
+      WHERE (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
+    `;
+    const params = [];
+    if (tId) {
+      params.push(uId, tId, tId, uId);
+      sql += ` AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))`;
+    } else {
+      params.push(uId, uId);
+      sql += ` AND (recipient_id = ? OR sender_id = ?)`;
+    }
+    if (sId) {
+      params.push(sId);
+      sql += ` AND id > ?`;
+    } else if (!tId) {
+      params.push(uId);
+      sql += ` AND recipient_id = ? AND (status != 'READ' OR read_at IS NULL)`;
+    }
+    sql += ` ORDER BY id ASC LIMIT 100`;
+
+    return new Promise((resolve, reject) => {
+      sqliteDb.all(sql, params, (err, rows) => {
+        if (err) return reject(err);
+        const mapped = (rows || [])
+          .map(formatMessage)
+          .filter(m => !m.deletedByUsers.includes(uId));
+        resolve(mapped);
+      });
+    });
+  }
+}
+
 

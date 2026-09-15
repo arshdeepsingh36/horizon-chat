@@ -55,6 +55,19 @@ CREATE TABLE IF NOT EXISTS user_reports (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 5. User Push Tokens (Web Push & FCM)
+CREATE TABLE IF NOT EXISTS user_push_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    device_type VARCHAR(20) DEFAULT 'web', -- 'web', 'android', 'ios'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON user_push_tokens(user_id);
+
 -- Safe migrations for existing deployments
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS display_name TEXT;
@@ -63,7 +76,8 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_view_once BOOLEAN DEFAULT FALSE;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_viewed BOOLEAN DEFAULT FALSE;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS r2_key TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions TEXT DEFAULT '{}';
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN DEFAULT FALSE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by_users TEXT DEFAULT '[]';
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP WITH TIME ZONE;
-
-
-

@@ -206,8 +206,40 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
     override fun onResume() {
         super.onResume()
         HorizonNotificationManager.activeChatPartnerId = targetUserId
+        MessageDispatchManager.setCurrentUser(currentUserId)
+        MessageDispatchManager.setActivePartner(targetUserId)
         if (authToken.isNotEmpty()) {
             MessageDispatchManager.emitBatchRead(targetUserId)
+            silentSyncRecentMessages()
+        }
+    }
+
+    private fun silentSyncRecentMessages() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val latestId = cachedMessageList.maxOfOrNull { it.id } ?: 0L
+                val res = ApiClient.apiService.syncMessages(
+                    token = "Bearer $authToken",
+                    targetUserId = targetUserId,
+                    sinceId = if (latestId > 0) latestId else null
+                )
+                if (res.isSuccessful && res.body() != null) {
+                    val newBatch = res.body()!!
+                    if (newBatch.isNotEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            val existingIds = cachedMessageList.map { it.id }.toSet()
+                            val unadded = newBatch.filter { it.id !in existingIds }
+                            if (unadded.isNotEmpty()) {
+                                cachedMessageList.addAll(unadded)
+                                unadded.forEach { adapter.appendMessage(it) }
+                                binding.rvChatMessages.scrollToPosition(adapter.itemCount - 1)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -552,7 +584,22 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
 
     private fun showDeleteDialog(msg: ChatMessage) {
         val isMe = msg.senderId == currentUserId
-        val options = if (isMe) {
+        var canDeleteForEveryone = false
+        if (isMe && !msg.deletedForEveryone) {
+            try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                val createdDate = sdf.parse(msg.createdAt) ?: Date()
+                val now = System.currentTimeMillis()
+                val sentWithin60m = (now - createdDate.time) <= 60 * 60 * 1000
+                canDeleteForEveryone = sentWithin60m
+            } catch (e: Exception) {
+                canDeleteForEveryone = false
+            }
+        }
+
+        val options = if (canDeleteForEveryone) {
             arrayOf("Delete for me", "Delete for everyone")
         } else {
             arrayOf("Delete for me")
@@ -562,9 +609,9 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             .setTitle("Delete message?")
             .setItems(options) { _, which ->
                 if (which == 0) {
-                    MessageDispatchManager.emitDelete(msg.id, deleteForEveryone = false)
+                    MessageDispatchManager.emitDelete(msg.id, recipientId = targetUserId, deleteForEveryone = false)
                 } else {
-                    MessageDispatchManager.emitDelete(msg.id, deleteForEveryone = true)
+                    MessageDispatchManager.emitDelete(msg.id, recipientId = targetUserId, deleteForEveryone = true)
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -1581,14 +1628,15 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             if (idx != -1) {
                 if (deletedForEveryone) {
                     cachedMessageList[idx].deletedForEveryone = true
-                    cachedMessageList[idx].messageText = "🚫 This message was deleted"
+                    cachedMessageList[idx].messageText = "This message was deleted"
                     cachedMessageList[idx].attachmentType = "NONE"
                     cachedMessageList[idx].attachmentUrl = null
+                    cachedMessageList[idx].thumbnailBlur = null
                 } else if (deletedByUsers.contains(currentUserId)) {
                     cachedMessageList.removeAt(idx)
                 }
             }
-            adapter.updateMessageDeleted(messageId, deletedForEveryone, "🚫 This message was deleted")
+            adapter.updateMessageDeleted(messageId, deletedForEveryone, "This message was deleted")
             updatePinnedBannerUI()
         }
     }

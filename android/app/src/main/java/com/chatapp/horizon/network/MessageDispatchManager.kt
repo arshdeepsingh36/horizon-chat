@@ -18,6 +18,34 @@ object MessageDispatchManager {
     private var globalSocket: Socket? = null
     private var activeAuthToken: String = ""
     private var activeServerUrl: String = ApiClient.BASE_URL.trimEnd('/')
+    private var currentUserId: Int = 0
+    private var activePartnerId: Int = 0
+
+    fun setCurrentUser(userId: Int) {
+        currentUserId = userId
+        if (userId > 0 && globalSocket?.connected() == true) {
+            globalSocket?.emit("join_user", JSONObject().apply { put("userId", userId) })
+            globalSocket?.emit("join", "user_$userId")
+        }
+    }
+
+    fun setActivePartner(partnerId: Int) {
+        activePartnerId = partnerId
+        joinConversationRoom(partnerId)
+    }
+
+    private fun joinConversationRoom(partnerId: Int) {
+        if (partnerId <= 0 || currentUserId <= 0) return
+        val sock = globalSocket ?: return
+        if (sock.connected()) {
+            val convRoom = "chat_${Math.min(currentUserId, partnerId)}_${Math.max(currentUserId, partnerId)}"
+            sock.emit("join_room", JSONObject().apply {
+                put("partnerId", partnerId)
+                put("roomId", convRoom)
+            })
+            sock.emit("join", convRoom)
+        }
+    }
 
     interface MessageEventListener {
         fun onNewMessage(message: ChatMessage) {}
@@ -53,22 +81,44 @@ object MessageDispatchManager {
         try {
             val options = IO.Options().apply {
                 auth = mapOf("token" to authToken)
+                transports = arrayOf("websocket", "polling")
                 reconnection = true
                 reconnectionDelay = 1000
+                reconnectionDelayMax = 5000
                 reconnectionAttempts = Int.MAX_VALUE
             }
 
             globalSocket = IO.socket(serverUrl, options).apply {
-                on("connect") {
+                val handleRejoin = {
+                    if (currentUserId > 0) {
+                        emit("join_user", JSONObject().apply { put("userId", currentUserId) })
+                        emit("join", "user_$currentUserId")
+                    }
+                    if (activePartnerId > 0) {
+                        joinConversationRoom(activePartnerId)
+                    }
                     scope.launch {
                         processPendingQueue()
                     }
                 }
 
+                on("connect") { handleRejoin() }
+                on("reconnect") { handleRejoin() }
+
                 on("new_message") { args ->
                     if (args.isNotEmpty()) {
                         val json = args[0] as? JSONObject ?: return@on
                         val msg = parseJsonMessage(json)
+                        if (currentUserId > 0 && msg.recipientId == currentUserId) {
+                            emit("mark_delivered", JSONObject().apply {
+                                put("messageId", msg.id)
+                                put("senderId", msg.senderId)
+                            })
+                            emit("message_delivered", JSONObject().apply {
+                                put("messageId", msg.id)
+                                put("senderId", msg.senderId)
+                            })
+                        }
                         listeners.forEach { it.onNewMessage(msg) }
                     }
                 }
@@ -76,9 +126,20 @@ object MessageDispatchManager {
                 on("message_delivered_ack") { args ->
                     if (args.isNotEmpty()) {
                         val data = args[0] as? JSONObject
-                        val mId = data?.optLong("messageId", -1L) ?: -1L
+                        val mId = data?.optLong("messageId", -1L) ?: (data?.optLong("id", -1L) ?: -1L)
                         if (mId > 0) {
                             listeners.forEach { it.onMessageStatusUpdated(mId, null, "DELIVERED") }
+                        }
+                    }
+                }
+
+                on("message_status_update") { args ->
+                    if (args.isNotEmpty()) {
+                        val data = args[0] as? JSONObject
+                        val mId = data?.optLong("messageId", -1L) ?: (data?.optLong("id", -1L) ?: -1L)
+                        val status = data?.optString("status", "") ?: ""
+                        if (mId > 0 && status.isNotEmpty()) {
+                            listeners.forEach { it.onMessageStatusUpdated(mId, null, status) }
                         }
                     }
                 }
@@ -274,9 +335,11 @@ object MessageDispatchManager {
         })
     }
 
-    fun emitDelete(messageId: Long, deleteForEveryone: Boolean) {
+    fun emitDelete(messageId: Long, recipientId: Int = 0, deleteForEveryone: Boolean = false) {
         globalSocket?.emit("delete_message", JSONObject().apply {
             put("messageId", messageId)
+            if (recipientId > 0) put("recipientId", recipientId)
+            put("mode", if (deleteForEveryone) "everyone" else "me")
             put("deleteForEveryone", deleteForEveryone)
         })
     }

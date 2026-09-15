@@ -40,26 +40,33 @@ function normalizeMsg(m) {
   const r2Key = m.r2Key ?? m.r2_key ?? null;
   const thumbnailBlur = m.thumbnailBlur ?? m.thumbnail_blur ?? null;
   const fileSizeBytes = Number(m.fileSizeBytes ?? m.file_size_bytes ?? 0);
-  const status = m.status || 'SENT';
-  const isViewOnce = Boolean(m.isViewOnce ?? m.is_view_once);
-  const isViewed = Boolean(m.isViewed ?? m.is_view_viewed ?? m.is_viewed);
-  const createdAt = m.createdAt ?? m.created_at ?? new Date().toISOString();
-  const pending = Boolean(m.pending);
+  const isPinned = Boolean(m.isPinned ?? m.is_pinned);
+  const deletedForEveryone = Boolean(m.deletedForEveryone ?? m.deleted_for_everyone);
+  const deletedByUsers = m.deletedByUsers ?? (typeof m.deleted_by_users === 'string' ? JSON.parse(m.deleted_by_users || '[]') : (m.deleted_by_users || []));
+  const readAt = m.readAt ?? m.read_at ?? null;
+
+  const displayText = deletedForEveryone ? 'This message was deleted' : text;
+  const displayAttachmentType = deletedForEveryone ? 'NONE' : attachmentType;
+  const displayAttachmentUrl = deletedForEveryone ? null : attachmentUrl;
 
   return {
     id,
     tempId,
     senderId,
     recipientId,
-    text,
-    attachmentType,
-    attachmentUrl,
-    r2Key,
-    thumbnailBlur,
-    fileSizeBytes,
+    text: displayText,
+    attachmentType: displayAttachmentType,
+    attachmentUrl: displayAttachmentUrl,
+    r2Key: deletedForEveryone ? null : r2Key,
+    thumbnailBlur: deletedForEveryone ? null : thumbnailBlur,
+    fileSizeBytes: deletedForEveryone ? 0 : fileSizeBytes,
     status,
     isViewOnce,
     isViewed,
+    isPinned,
+    deletedForEveryone,
+    deletedByUsers,
+    readAt,
     createdAt,
     pending
   };
@@ -95,12 +102,12 @@ export default function HorizonChatView({
     }
   };
 
-  // Cloudflare R2 Direct Upload & Voice Recording states
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isViewOnceSelected, setIsViewOnceSelected] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [activeMessageMenuId, setActiveMessageMenuId] = useState(null);
 
   const activeAudioRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -242,7 +249,7 @@ export default function HorizonChatView({
     };
   }, [socket, partner?.id, user?.id]);
 
-  // 2. Socket Listeners for Real-Time Messages and Read Receipts
+  // 2. Socket Listeners for Real-Time Messages, Delivery Receipts, Status Updates & Deletions
   useEffect(() => {
     if (!socket) return;
 
@@ -253,13 +260,17 @@ export default function HorizonChatView({
       // Check if this message belongs to the current open conversation
       if (msg.senderId === partner.id) {
         setMessages((prev) => {
-          // Guard against duplicates
           if (prev.some((m) => m.id === msg.id || (msg.tempId && m.tempId === msg.tempId))) return prev;
           return [...prev, msg];
         });
 
-        // Auto-mark as read since chat is currently open
+        // 1. Immediately emit delivery receipt acknowledgment back to sender
+        socket.emit('mark_delivered', { messageId: msg.id, senderId: msg.senderId });
+        socket.emit('message_delivered', { messageId: msg.id, senderId: msg.senderId });
+
+        // 2. Auto-mark as read since conversation is actively open
         socket.emit('mark_read', { messageId: msg.id, senderId: msg.senderId });
+        socket.emit('mark_conversation_read', { partnerId: partner.id });
 
         // Scroll down smoothly
         setTimeout(() => {
@@ -285,11 +296,61 @@ export default function HorizonChatView({
       }
     };
 
-    const handleReadAck = ({ messageId }) => {
-      const targetId = Number(messageId);
+    const handleReadAck = ({ messageId, all }) => {
+      if (all) {
+        setMessages((prev) => prev.map((m) => ({ ...m, status: 'READ' })));
+      } else if (messageId) {
+        const targetId = Number(messageId);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === targetId ? { ...m, status: 'READ' } : m))
+        );
+      }
+    };
+
+    const handleDeliveredAck = ({ messageId, id }) => {
+      const targetId = Number(messageId || id);
+      if (!targetId) return;
       setMessages((prev) =>
-        prev.map((m) => (m.id === targetId ? { ...m, status: 'READ' } : m))
+        prev.map((m) => (m.id === targetId && m.status !== 'READ' ? { ...m, status: 'DELIVERED' } : m))
       );
+    };
+
+    const handleStatusUpdate = ({ messageId, id, status }) => {
+      const targetId = Number(messageId || id);
+      if (!targetId || !status) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === targetId ? { ...m, status } : m))
+      );
+    };
+
+    const handleMessageDeleted = (payload) => {
+      const mId = Number(payload.messageId || payload.id);
+      const deletedForEveryone = Boolean(payload.deletedForEveryone);
+      const deletedByUsers = payload.deletedByUsers || [];
+
+      setMessages((prev) => {
+        if (deletedForEveryone) {
+          return prev.map((m) => {
+            if (m.id === mId) {
+              return {
+                ...m,
+                deletedForEveryone: true,
+                text: 'This message was deleted',
+                messageText: 'This message was deleted',
+                attachmentType: 'NONE',
+                attachmentUrl: null,
+                mediaUrl: null,
+                thumbnailBlur: null,
+                fileSizeBytes: 0
+              };
+            }
+            return m;
+          });
+        } else if (deletedByUsers.includes(Number(user.id))) {
+          return prev.filter((m) => m.id !== mId);
+        }
+        return prev;
+      });
     };
 
     const handleStatusChanged = ({ userId, status }) => {
@@ -306,16 +367,104 @@ export default function HorizonChatView({
 
     socket.on('new_message', handleNewMessage);
     socket.on('message_read_ack', handleReadAck);
+    socket.on('message_delivered_ack', handleDeliveredAck);
+    socket.on('message_status_update', handleStatusUpdate);
+    socket.on('message_deleted', handleMessageDeleted);
     socket.on('user_status_changed', handleStatusChanged);
     socket.on('media_viewed', handleMediaViewed);
 
     return () => {
       socket.off('new_message', handleNewMessage);
       socket.off('message_read_ack', handleReadAck);
+      socket.off('message_delivered_ack', handleDeliveredAck);
+      socket.off('message_status_update', handleStatusUpdate);
+      socket.off('message_deleted', handleMessageDeleted);
       socket.off('user_status_changed', handleStatusChanged);
       socket.off('media_viewed', handleMediaViewed);
     };
   }, [socket, partner?.id, user?.id]);
+
+  // Foreground & Visibility Sync (catch any messages missed while tab/app was inactive)
+  useEffect(() => {
+    if (!partner?.id || !token) return;
+
+    const syncMessages = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const latestId = messages.length > 0 ? messages[messages.length - 1].id : null;
+        const url = latestId
+          ? `${apiBaseUrl}/api/messages/sync?targetUserId=${partner.id}&sinceId=${latestId}`
+          : `${apiBaseUrl}/api/messages/${partner.id}?limit=25`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const normalized = data.map(normalizeMsg).filter(Boolean);
+          setMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newItems = normalized.filter((m) => !existingIds.has(m.id));
+            if (newItems.length === 0) return prev;
+            return [...prev, ...newItems];
+          });
+        }
+      } catch (e) {
+        console.warn('[FOREGROUND SYNC ERROR]', e);
+      }
+    };
+
+    document.addEventListener('visibilitychange', syncMessages);
+    window.addEventListener('focus', syncMessages);
+    return () => {
+      document.removeEventListener('visibilitychange', syncMessages);
+      window.removeEventListener('focus', syncMessages);
+    };
+  }, [partner?.id, token, apiBaseUrl, messages.length]);
+
+  // Message Deletion Action Handler
+  const handleDeleteMessage = async (msg, mode = 'me') => {
+    setActiveMessageMenuId(null);
+    try {
+      if (socket && socket.connected) {
+        socket.emit('delete_message', {
+          messageId: msg.id,
+          recipientId: partner.id,
+          mode
+        });
+      } else {
+        await fetch(`${apiBaseUrl}/api/messages/${msg.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ mode, recipientId: partner.id })
+        });
+      }
+
+      // Optimistic update
+      if (mode === 'everyone') {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.id
+              ? {
+                  ...m,
+                  deletedForEveryone: true,
+                  text: 'This message was deleted',
+                  attachmentType: 'NONE',
+                  attachmentUrl: null,
+                  mediaUrl: null,
+                  thumbnailBlur: null,
+                  fileSizeBytes: 0
+                }
+              : m
+          )
+        );
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      }
+    } catch (err) {
+      console.error('[DELETE MSG ERROR]', err);
+    }
+  };
 
   // 3. Reverse Cursor Pagination: Fetch older messages when scrolling to top
   const handleScroll = async (e) => {
@@ -929,23 +1078,29 @@ export default function HorizonChatView({
                     </div>
                   )}
 
-                  {/* Message Text */}
-                  {msg.attachmentType !== 'AUDIO' && msg.attachmentType !== 'DOCUMENT' && (
-                    msg.text ? (
-                      <div className="horizon-bubble-text">{msg.text}</div>
-                    ) : (!isMedia && msg.attachmentType !== 'VIDEO') ? (
-                      <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.7 }}>
-                        (Empty message)
-                      </div>
-                    ) : null
+                  {/* Message Text / Deleted Notice */}
+                  {msg.deletedForEveryone ? (
+                    <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.65, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>This message was deleted</span>
+                    </div>
+                  ) : (
+                    msg.attachmentType !== 'AUDIO' && msg.attachmentType !== 'DOCUMENT' && (
+                      msg.text ? (
+                        <div className="horizon-bubble-text">{msg.text}</div>
+                      ) : (!isMedia && msg.attachmentType !== 'VIDEO') ? (
+                        <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.7 }}>
+                          (Empty message)
+                        </div>
+                      ) : null
+                    )
                   )}
 
-                  {/* Metadata (Timestamp + Status Ticks) */}
-                  <div className="horizon-bubble-meta">
+                  {/* Metadata (Timestamp + Status Ticks + Delete Trigger) */}
+                  <div className="horizon-bubble-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
                     <span>{formatMessageTime(msg.createdAt)}</span>
 
                     {isMe && (
-                      <span className={`horizon-tick ${msg.status === 'READ' ? 'read' : 'sent'}`}>
+                      <span className={`horizon-tick ${msg.status === 'READ' ? 'read' : (msg.status === 'DELIVERED' ? 'delivered' : 'sent')}`} title={msg.status}>
                         {msg.pending ? (
                           <Clock size={12} />
                         ) : msg.status === 'SENT' ? (
@@ -955,7 +1110,115 @@ export default function HorizonChatView({
                         )}
                       </span>
                     )}
+
+                    {/* Context Action Menu Trigger */}
+                    {!msg.deletedForEveryone && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMessageMenuId(activeMessageMenuId === msg.id ? null : msg.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '2px',
+                          color: 'var(--color-text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          opacity: 0.6,
+                          marginLeft: '2px'
+                        }}
+                        title="Message Options"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
                   </div>
+
+                  {/* Delete Options Popover */}
+                  {activeMessageMenuId === msg.id && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: isMe ? '0' : 'auto',
+                        left: isMe ? 'auto' : '0',
+                        bottom: '100%',
+                        marginBottom: '6px',
+                        background: '#1E293B',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '10px',
+                        padding: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        zIndex: 30,
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                        minWidth: '160px'
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMessage(msg, 'me')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#F8FAFC',
+                          padding: '6px 10px',
+                          textAlign: 'left',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <Trash2 size={13} color="#94A3B8" />
+                        <span>Delete for me</span>
+                      </button>
+
+                      {/* Delete for everyone condition: isMe && sent <= 60m && (!readAt || seen <= 7m) */}
+                      {(() => {
+                        const createdAtMs = new Date(msg.createdAt).getTime();
+                        const now = Date.now();
+                        const sentWithin60m = (now - createdAtMs) <= 60 * 60 * 1000;
+                        const seenWithin7m = !msg.readAt || ((now - new Date(msg.readAt).getTime()) <= 7 * 60 * 1000);
+                        const eligible = isMe && sentWithin60m && seenWithin7m;
+
+                        if (!eligible) return null;
+
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMessage(msg, 'everyone')}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#EF4444',
+                              padding: '6px 10px',
+                              textAlign: 'left',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              borderRadius: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                          >
+                            <Trash2 size={13} color="#EF4444" />
+                            <span>Delete for everyone</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
             );

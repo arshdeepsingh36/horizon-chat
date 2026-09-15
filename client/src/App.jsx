@@ -144,6 +144,77 @@ export default function App() {
     };
   }, [token, user?.id, apiBaseUrl, refreshChats, activePartner?.id]);
 
+  // Push Notification Subscription (Web Push)
+  useEffect(() => {
+    if (!token || !user || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    const urlBase64ToUint8Array = (base64String) => {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    };
+
+    const setupPush = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') return;
+
+        const keyRes = await fetch(`${apiBaseUrl}/api/notifications/vapid-public-key`);
+        const { publicKey } = await keyRes.json();
+        if (!publicKey) return;
+
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+          });
+        }
+
+        await fetch(`${apiBaseUrl}/api/notifications/register-token`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            subscription,
+            deviceType: 'web'
+          })
+        });
+      } catch (err) {
+        console.warn('[PUSH REGISTRATION NOTICE]', err.message);
+      }
+    };
+
+    setupPush();
+  }, [token, user, apiBaseUrl]);
+
+  // Silent sync on visibilitychange & window focus (catch missed messages while inactive)
+  useEffect(() => {
+    if (!token) return;
+
+    const handleSync = () => {
+      if (document.visibilityState === 'visible') {
+        refreshChats(token);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleSync);
+    window.addEventListener('focus', handleSync);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [token, refreshChats]);
+
   const handleLogin = ({ token: newToken, user: newUser }) => {
     setToken(newToken);
     setUser(newUser);

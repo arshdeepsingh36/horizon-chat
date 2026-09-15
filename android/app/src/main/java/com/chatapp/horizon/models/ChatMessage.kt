@@ -22,7 +22,7 @@ data class ChatMessage(
     var attachmentUrl: String? = null,
 
     @SerializedName("thumbnail_blur")
-    val thumbnailBlur: String? = null, // Base64 micro-thumbnail (~200 bytes)
+    var thumbnailBlur: String? = null, // Base64 micro-thumbnail (~200 bytes)
 
     @SerializedName("file_size_bytes")
     val fileSizeBytes: Long = 0,

@@ -552,9 +552,10 @@ class ChatAdapter(
 
             var isFullImageLoaded = false
 
-            if (!msg.thumbnailBlur.isNullOrEmpty()) {
+            val blur = msg.thumbnailBlur
+            if (!blur.isNullOrEmpty()) {
                 try {
-                    val cleanBase64 = msg.thumbnailBlur.substringAfter("base64,")
+                    val cleanBase64 = blur.substringAfter("base64,")
                     val decodedBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
                     val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
                     binding.ivThumbnail.setImageBitmap(bitmap)

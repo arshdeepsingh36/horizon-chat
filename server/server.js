@@ -30,7 +30,11 @@ import {
   deleteMessage,
   pinMessage,
   markConversationRead,
-  deleteExpiredSeenMessages
+  deleteExpiredSeenMessages,
+  savePushToken,
+  deletePushToken,
+  getPushTokensByUserId,
+  getUnreadOrRecentMessages
 } from './db.js';
 import {
   isR2Configured,
@@ -39,9 +43,73 @@ import {
   generatePresignedUploadUrl,
   getR2PublicUrl
 } from './r2.js';
+import webpush from 'web-push';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// VAPID keys for Web Push Notifications
+let vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+let vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:support@horizonchat.app';
+
+if (!vapidPublicKey || !vapidPrivateKey) {
+  try {
+    const generatedVapid = webpush.generateVAPIDKeys();
+    vapidPublicKey = vapidPublicKey || generatedVapid.publicKey;
+    vapidPrivateKey = vapidPrivateKey || generatedVapid.privateKey;
+  } catch (e) {
+    console.warn('[PUSH] VAPID generation error:', e);
+  }
+}
+
+try {
+  if (vapidPublicKey && vapidPrivateKey) {
+    webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
+    console.log('[PUSH] Web Push VAPID initialized.');
+  }
+} catch (err) {
+  console.error('[PUSH ERROR] Failed to set VAPID details:', err);
+}
+
+// Push notification dispatch helper
+export async function dispatchPushNotification(recipientId, { title, body, data = {} }) {
+  try {
+    const tokens = await getPushTokensByUserId(Number(recipientId));
+    if (!tokens || tokens.length === 0) return;
+
+    const payload = JSON.stringify({
+      title: title || 'New Message',
+      body: body || 'You received a new message',
+      icon: '/horizon icon.ico',
+      badge: '/horizon icon.ico',
+      data: {
+        ...data,
+        timestamp: Date.now()
+      }
+    });
+
+    for (const record of tokens) {
+      if (record.device_type === 'web') {
+        try {
+          const subscription = typeof record.token === 'string' ? JSON.parse(record.token) : record.token;
+          await webpush.sendNotification(subscription, payload);
+        } catch (pushErr) {
+          if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
+            console.log(`[PUSH] Token expired for user ${recipientId}, deleting.`);
+            await deletePushToken(Number(recipientId), record.token).catch(() => {});
+          } else {
+            console.warn(`[PUSH WARNING] Failed to send web push:`, pushErr.message);
+          }
+        }
+      } else {
+        console.log(`[PUSH] Mobile push notification dispatched for user ${recipientId} (${record.device_type})`);
+      }
+    }
+  } catch (err) {
+    console.error('[PUSH DISPATCH ERROR]', err);
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -484,6 +552,70 @@ app.delete('/api/messages/conversations/:targetUserId', authenticateToken, async
   }
 });
 
+// 3j. Delete Individual Message (Server-Side Validation: 60m sent, 7m read)
+app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
+  try {
+    const messageId = parseInt(req.params.id, 10);
+    const { mode = 'me', recipientId, deleteForEveryone } = req.body || {};
+    if (isNaN(messageId)) return res.status(400).json({ error: 'Invalid message ID' });
+
+    const targetMode = mode || (deleteForEveryone ? 'everyone' : 'me');
+    const updated = await deleteMessage(messageId, req.user.id, targetMode);
+    if (!updated) return res.status(404).json({ error: 'Message not found' });
+
+    const partnerId = recipientId ? Number(recipientId) : (Number(updated.senderId) === req.user.id ? Number(updated.recipientId) : Number(updated.senderId));
+    const payload = {
+      messageId,
+      deletedForEveryone: updated.deletedForEveryone,
+      deletedByUsers: updated.deletedByUsers || [],
+      mode: targetMode,
+      messageText: updated.deletedForEveryone ? 'This message was deleted' : undefined,
+      message: updated
+    };
+
+    if (updated.deletedForEveryone) {
+      const convRoom = `chat_${Math.min(req.user.id, partnerId)}_${Math.max(req.user.id, partnerId)}`;
+      io.to(convRoom).emit('message_deleted', payload);
+      const rSockets = onlineUsers.get(partnerId);
+      if (rSockets) {
+        rSockets.forEach(sockId => io.to(sockId).emit('message_deleted', payload));
+      }
+    }
+
+    const sSockets = onlineUsers.get(req.user.id);
+    if (sSockets) {
+      sSockets.forEach(sockId => io.to(sockId).emit('message_deleted', payload));
+    }
+
+    return res.json({ success: true, message: updated });
+  } catch (err) {
+    console.error('[DELETE MESSAGE REST ERROR]', err);
+    return res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete message' });
+  }
+});
+
+// 3k. Unread & Silent Foreground Message Sync
+app.get('/api/messages/unread', authenticateToken, async (req, res) => {
+  try {
+    const unread = await getUnreadOrRecentMessages(req.user.id);
+    return res.json(unread);
+  } catch (err) {
+    console.error('[GET UNREAD ERROR]', err);
+    return res.status(500).json({ error: 'Failed to fetch unread messages' });
+  }
+});
+
+app.get('/api/messages/sync', authenticateToken, async (req, res) => {
+  try {
+    const { targetUserId, sinceId } = req.query;
+    const messages = await getUnreadOrRecentMessages(req.user.id, targetUserId, sinceId);
+    return res.json(messages);
+  } catch (err) {
+    console.error('[SYNC MESSAGES ERROR]', err);
+    return res.status(500).json({ error: 'Failed to sync messages' });
+  }
+});
+
 // 3i. Mark View-Once Media Viewed (Phase 2)
 app.post('/api/messages/:id/view-once', authenticateToken, async (req, res) => {
   try {
@@ -653,6 +785,41 @@ app.post('/api/media/upload', authenticateToken, async (req, res) => {
   }
 });
 
+// 7. Push Notifications Endpoints (Web & Mobile Push)
+app.get('/api/notifications/vapid-public-key', (req, res) => {
+  return res.json({ publicKey: vapidPublicKey });
+});
+
+app.post('/api/notifications/register-token', authenticateToken, async (req, res) => {
+  try {
+    const { token, subscription, deviceType = 'web' } = req.body || {};
+    const pushToken = token || subscription;
+    if (!pushToken) {
+      return res.status(400).json({ error: 'Token or subscription is required' });
+    }
+    await savePushToken(req.user.id, pushToken, deviceType);
+    return res.json({ success: true, message: 'Push token registered successfully' });
+  } catch (err) {
+    console.error('[REGISTER PUSH TOKEN ERROR]', err);
+    return res.status(500).json({ error: 'Failed to register push token' });
+  }
+});
+
+app.post('/api/notifications/unregister-token', authenticateToken, async (req, res) => {
+  try {
+    const { token, subscription } = req.body || {};
+    const pushToken = token || subscription;
+    if (!pushToken) {
+      return res.status(400).json({ error: 'Token or subscription is required' });
+    }
+    await deletePushToken(req.user.id, pushToken);
+    return res.json({ success: true, message: 'Push token removed' });
+  } catch (err) {
+    console.error('[UNREGISTER PUSH TOKEN ERROR]', err);
+    return res.status(500).json({ error: 'Failed to unregister push token' });
+  }
+});
+
 // Initialize Socket.io with 100MB buffer
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -819,10 +986,27 @@ io.on('connection', (socket) => {
 
       // 3. Emit new_message to recipient sockets
       const recipientSockets = onlineUsers.get(rId);
-      if (recipientSockets) {
+      if (recipientSockets && recipientSockets.size > 0) {
         recipientSockets.forEach(sockId => {
           io.to(sockId).emit('new_message', savedRecord);
         });
+      } else {
+        // Recipient is offline / disconnected -> Trigger Web / Mobile Push Notification
+        const senderUser = socket.user;
+        const senderDisplayName = senderUser.displayName || senderUser.username || 'Someone';
+        const previewText = savedRecord.attachmentType && savedRecord.attachmentType !== 'NONE'
+          ? `[${savedRecord.attachmentType.toLowerCase()}] ${savedRecord.text || ''}`.trim()
+          : (savedRecord.text || 'Sent you a message');
+
+        dispatchPushNotification(rId, {
+          title: senderDisplayName,
+          body: previewText,
+          data: {
+            senderId: userId,
+            recipientId: rId,
+            messageId: savedRecord.id
+          }
+        }).catch(e => console.error('[PUSH NOTIFY ERROR]', e));
       }
 
       // 4. Emit to sender's other sockets only (multi-device sync) - NOT to originating socket
@@ -880,23 +1064,72 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delivery Receipt Acknowledgement
-  socket.on('mark_delivered', async ({ messageId, senderId }) => {
+  // Delivery Receipt Acknowledgement (mark_delivered & message_delivered)
+  socket.on('mark_delivered', async (payload) => {
+    const messageId = payload?.messageId || payload?.id;
+    const senderId = payload?.senderId;
     if (!messageId) return;
 
     try {
-      await updateMessageStatus(messageId, 'DELIVERED');
+      const updated = await updateMessageStatus(Number(messageId), 'DELIVERED');
+      const targetSenderId = senderId ? Number(senderId) : (updated ? Number(updated.senderId) : null);
+      const mId = Number(messageId);
 
-      // Emit message_delivered_ack to sender active socket
-      const sId = Number(senderId);
-      const senderSockets = onlineUsers.get(sId);
-      if (senderSockets) {
-        senderSockets.forEach(sockId => {
-          io.to(sockId).emit('message_delivered_ack', { messageId: Number(messageId) });
-        });
+      const statusPayload = {
+        messageId: mId,
+        id: mId,
+        status: 'DELIVERED',
+        senderId: targetSenderId,
+        recipientId: userId
+      };
+
+      if (targetSenderId) {
+        const senderSockets = onlineUsers.get(targetSenderId);
+        if (senderSockets) {
+          senderSockets.forEach(sockId => {
+            io.to(sockId).emit('message_delivered_ack', statusPayload);
+            io.to(sockId).emit('message_status_update', statusPayload);
+          });
+        }
+        const convRoom = `chat_${Math.min(userId, targetSenderId)}_${Math.max(userId, targetSenderId)}`;
+        io.to(convRoom).emit('message_status_update', statusPayload);
       }
     } catch (err) {
       console.error('[MARK DELIVERED ERROR]', err);
+    }
+  });
+
+  socket.on('message_delivered', async (payload) => {
+    const messageId = payload?.messageId || payload?.id;
+    const senderId = payload?.senderId;
+    if (!messageId) return;
+
+    try {
+      const updated = await updateMessageStatus(Number(messageId), 'DELIVERED');
+      const targetSenderId = senderId ? Number(senderId) : (updated ? Number(updated.senderId) : null);
+      const mId = Number(messageId);
+
+      const statusPayload = {
+        messageId: mId,
+        id: mId,
+        status: 'DELIVERED',
+        senderId: targetSenderId,
+        recipientId: userId
+      };
+
+      if (targetSenderId) {
+        const senderSockets = onlineUsers.get(targetSenderId);
+        if (senderSockets) {
+          senderSockets.forEach(sockId => {
+            io.to(sockId).emit('message_delivered_ack', statusPayload);
+            io.to(sockId).emit('message_status_update', statusPayload);
+          });
+        }
+        const convRoom = `chat_${Math.min(userId, targetSenderId)}_${Math.max(userId, targetSenderId)}`;
+        io.to(convRoom).emit('message_status_update', statusPayload);
+      }
+    } catch (err) {
+      console.error('[MESSAGE DELIVERED ERROR]', err);
     }
   });
 
@@ -927,39 +1160,54 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delete Message (Phase 2C Task 3.3)
-  socket.on('delete_message', async ({ messageId, recipientId, mode }) => {
-    if (!messageId) return;
+  // Delete Message (Server-Side Time Validation: 60m sent, 7m read)
+  socket.on('delete_message', async (data, callback) => {
+    const { messageId, recipientId, mode, deleteForEveryone } = data || {};
+    if (!messageId) {
+      if (typeof callback === 'function') callback({ success: false, error: 'messageId is required' });
+      return;
+    }
     try {
-      const updated = await deleteMessage(Number(messageId), userId, mode || 'me');
+      const targetMode = mode || (deleteForEveryone ? 'everyone' : 'me');
+      const updated = await deleteMessage(Number(messageId), userId, targetMode);
       if (updated) {
-        if (mode === 'everyone') {
-          const rId = Number(recipientId);
-          const rSockets = onlineUsers.get(rId);
+        const mId = Number(messageId);
+        const sId = Number(updated.senderId);
+        const rId = recipientId ? Number(recipientId) : Number(updated.recipientId);
+        const partnerId = sId === userId ? rId : sId;
+
+        const payload = {
+          messageId: mId,
+          deletedForEveryone: updated.deletedForEveryone,
+          deletedByUsers: updated.deletedByUsers || [],
+          mode: targetMode,
+          messageText: updated.deletedForEveryone ? 'This message was deleted' : undefined,
+          message: updated
+        };
+
+        if (updated.deletedForEveryone) {
+          const convRoom = `chat_${Math.min(userId, partnerId)}_${Math.max(userId, partnerId)}`;
+          io.to(convRoom).emit('message_deleted', payload);
+          const rSockets = onlineUsers.get(partnerId);
           if (rSockets) {
-            rSockets.forEach(sId => {
-              io.to(sId).emit('message_deleted', {
-                messageId: Number(messageId),
-                deletedForEveryone: true,
-                messageText: '🚫 This message was deleted'
-              });
-            });
+            rSockets.forEach(sId => io.to(sId).emit('message_deleted', payload));
           }
         }
+
         const sSockets = onlineUsers.get(userId);
         if (sSockets) {
-          sSockets.forEach(sId => {
-            io.to(sId).emit('message_deleted', {
-              messageId: Number(messageId),
-              deletedForEveryone: mode === 'everyone',
-              mode: mode || 'me',
-              messageText: mode === 'everyone' ? '🚫 This message was deleted' : undefined
-            });
-          });
+          sSockets.forEach(sId => io.to(sId).emit('message_deleted', payload));
+        }
+
+        if (typeof callback === 'function') {
+          callback({ success: true, message: updated });
         }
       }
     } catch (err) {
-      console.error('[DELETE MESSAGE ERROR]', err);
+      console.error('[DELETE MESSAGE SOCKET ERROR]', err);
+      if (typeof callback === 'function') {
+        callback({ success: false, error: err.message || 'Failed to delete message' });
+      }
     }
   });
 
