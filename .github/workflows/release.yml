@@ -1,0 +1,39 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Publish Release to GitHub Releases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Horizon Chat ${{ github.ref_name }} Release"
+          body: |
+            ## Horizon Chat ${{ github.ref_name }}
+            
+            ### ✨ What's New:
+            - **Fixed Disappearing Messages**: Restored permanent cloud history retention and fixed real-time socket message reconciliation.
+            - **Android 13+ Notifications**: Full push notification support with runtime permission dialog.
+            - **Real-Time Delivery Receipts**: Sent (✓), Delivered (✓✓), and Read (blue ✓✓) ticks.
+            - **Delete for Everyone**: Time-limited deletion within 60m of sending and 7m of being seen.
+            - **Cloudflare R2 Direct Uploads**: Secure binary media sharing with zero server memory overhead.
+          files: |
+            apk/app-release.apk
+            apk/horizon-chat-v3.2.0.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
