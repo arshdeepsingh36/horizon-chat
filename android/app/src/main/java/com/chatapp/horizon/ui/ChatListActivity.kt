@@ -1,12 +1,17 @@
 package com.chatapp.horizon.ui
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.chatapp.horizon.databinding.ActivityChatListBinding
@@ -29,12 +34,29 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageEven
     private val cachedConversations = mutableListOf<Conversation>()
     private var searchJob: Job? = null
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            HorizonNotificationManager.init(this)
+        }
+    }
+
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityChatListBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         HorizonNotificationManager.init(this)
+        checkNotificationPermission()
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
         authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("horizon_token", null) ?: prefs.getString("token", "") ?: ""

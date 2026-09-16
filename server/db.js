@@ -576,7 +576,6 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
         SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
-          AND (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
           AND id < $3
         ORDER BY id DESC
         LIMIT $4
@@ -587,7 +586,6 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
         SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
-          AND (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
         ORDER BY id DESC
         LIMIT $3
       `;
@@ -606,7 +604,6 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
         SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
-          AND (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
           AND id < ?
         ORDER BY id DESC
         LIMIT ?
@@ -617,7 +614,6 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
         SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
-          AND (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
         ORDER BY id DESC
         LIMIT ?
       `;
@@ -746,7 +742,6 @@ export async function getUserConversations(currentUserId) {
       id, sender_id, recipient_id, message_text, attachment_type, status, is_view_once, is_viewed, read_at, created_at
     FROM messages
     WHERE (sender_id = $1 OR recipient_id = $2)
-      AND (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
     ORDER BY id DESC
   `;
 
@@ -761,11 +756,10 @@ export async function getUserConversations(currentUserId) {
         id, sender_id, recipient_id, message_text, attachment_type, status, is_view_once, is_viewed, read_at, created_at
       FROM messages
       WHERE (sender_id = ? OR recipient_id = ?)
-        AND (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
       ORDER BY id DESC
     `;
     rows = await new Promise((resolve, reject) => {
-      sqliteDb.all(sqliteSql, [currentUserId, currentUserId, currentUserId], (err, resRows) => {
+      sqliteDb.all(sqliteSql, [currentUserId, currentUserId], (err, resRows) => {
         if (err) return reject(err);
         resolve(resRows || []);
       });
@@ -1167,7 +1161,7 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
     let sql = `
       SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
       FROM messages
-      WHERE (read_at IS NULL OR read_at > NOW() - INTERVAL '24 hours')
+      WHERE 1=1
     `;
     const params = [];
     if (tId) {
@@ -1193,7 +1187,7 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
     let sql = `
       SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
       FROM messages
-      WHERE (read_at IS NULL OR read_at > datetime('now', '-24 hours'))
+      WHERE 1=1
     `;
     const params = [];
     if (tId) {

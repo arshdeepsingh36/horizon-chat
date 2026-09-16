@@ -217,7 +217,9 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
     private fun silentSyncRecentMessages() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val latestId = cachedMessageList.maxOfOrNull { it.id } ?: 0L
+                val latestId = cachedMessageList
+                    .filter { it.status != "PENDING" && it.id > 0L && it.id < 1000000000000L }
+                    .maxOfOrNull { it.id } ?: 0L
                 val res = ApiClient.apiService.syncMessages(
                     token = "Bearer $authToken",
                     targetUserId = targetUserId,

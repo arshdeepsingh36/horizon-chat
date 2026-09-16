@@ -40,10 +40,15 @@ function normalizeMsg(m) {
   const r2Key = m.r2Key ?? m.r2_key ?? null;
   const thumbnailBlur = m.thumbnailBlur ?? m.thumbnail_blur ?? null;
   const fileSizeBytes = Number(m.fileSizeBytes ?? m.file_size_bytes ?? 0);
+  const status = m.status || 'SENT';
+  const isViewOnce = Boolean(m.isViewOnce ?? m.is_view_once);
+  const isViewed = Boolean(m.isViewed ?? m.is_viewed);
   const isPinned = Boolean(m.isPinned ?? m.is_pinned);
   const deletedForEveryone = Boolean(m.deletedForEveryone ?? m.deleted_for_everyone);
   const deletedByUsers = m.deletedByUsers ?? (typeof m.deleted_by_users === 'string' ? JSON.parse(m.deleted_by_users || '[]') : (m.deleted_by_users || []));
   const readAt = m.readAt ?? m.read_at ?? null;
+  const createdAt = m.createdAt ?? m.created_at ?? new Date().toISOString();
+  const pending = Boolean(m.pending);
 
   const displayText = deletedForEveryone ? 'This message was deleted' : text;
   const displayAttachmentType = deletedForEveryone ? 'NONE' : attachmentType;
@@ -391,7 +396,10 @@ export default function HorizonChatView({
     const syncMessages = async () => {
       if (document.visibilityState !== 'visible') return;
       try {
-        const latestId = messages.length > 0 ? messages[messages.length - 1].id : null;
+        const numericIds = messages
+          .map((m) => Number(m.id))
+          .filter((id) => !isNaN(id) && id > 0 && id < 1000000000000);
+        const latestId = numericIds.length > 0 ? Math.max(...numericIds) : null;
         const url = latestId
           ? `${apiBaseUrl}/api/messages/sync?targetUserId=${partner.id}&sinceId=${latestId}`
           : `${apiBaseUrl}/api/messages/${partner.id}?limit=25`;

@@ -43,10 +43,19 @@ import {
   generatePresignedUploadUrl,
   getR2PublicUrl
 } from './r2.js';
-import webpush from 'web-push';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import webpush from 'web-push';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+if (fs.existsSync(path.resolve(__dirname, '.env'))) {
+  dotenv.config({ path: path.resolve(__dirname, '.env') });
+} else {
+  dotenv.config();
+}
 
 // VAPID keys for Web Push Notifications
 let vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
@@ -109,15 +118,6 @@ export async function dispatchPushNotification(recipientId, { title, body, data 
   } catch (err) {
     console.error('[PUSH DISPATCH ERROR]', err);
   }
-}
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-if (fs.existsSync(path.resolve(__dirname, '.env'))) {
-  dotenv.config({ path: path.resolve(__dirname, '.env') });
-} else {
-  dotenv.config();
 }
 
 const PORT = process.env.PORT || 5000;
@@ -608,7 +608,9 @@ app.get('/api/messages/unread', authenticateToken, async (req, res) => {
 app.get('/api/messages/sync', authenticateToken, async (req, res) => {
   try {
     const { targetUserId, sinceId } = req.query;
-    const messages = await getUnreadOrRecentMessages(req.user.id, targetUserId, sinceId);
+    const parsedTargetUserId = targetUserId && !isNaN(parseInt(targetUserId, 10)) ? parseInt(targetUserId, 10) : null;
+    const parsedSinceId = sinceId && !isNaN(parseInt(sinceId, 10)) ? parseInt(sinceId, 10) : null;
+    const messages = await getUnreadOrRecentMessages(req.user.id, parsedTargetUserId, parsedSinceId);
     return res.json(messages);
   } catch (err) {
     console.error('[SYNC MESSAGES ERROR]', err);
@@ -1288,17 +1290,10 @@ async function start() {
   try {
     await initDb();
 
-    // Auto-delete seen messages older than 24 hours (24h Ephemeral Retention)
-    await deleteExpiredSeenMessages();
-    setInterval(() => {
-      deleteExpiredSeenMessages().catch(e => console.error('[CLEANUP INTERVAL ERROR]', e));
-    }, 10 * 60 * 1000); // Check every 10 minutes
-
     server.listen(PORT, () => {
       console.log(`=======================================================`);
       console.log(`Horizon Chat Backend Server running on port ${PORT}`);
       console.log(`Architecture: TRD v2.0.0 (Neon PostgreSQL + Cursor Paging)`);
-      console.log(`Ephemeral: Auto-delete 24 hours after seen active`);
       console.log(`Ready for Android and Web clients.`);
       console.log(`=======================================================`);
     });
