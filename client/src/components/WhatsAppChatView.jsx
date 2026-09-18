@@ -147,15 +147,21 @@ export default function WhatsAppChatView({
     };
 
     socket.on('message_received', handleIncomingMessage);
+    socket.on('new_message', handleIncomingMessage);
     socket.on('messages_read', handleMessagesRead);
     socket.on('message_reaction_updated', handleReactionUpdated);
+    socket.on('message_reaction', handleReactionUpdated);
+    socket.on('message_reacted', handleReactionUpdated);
     socket.on('user_typing', handleUserTyping);
     socket.on('user_presence_change', handlePresenceChange);
 
     return () => {
       socket.off('message_received', handleIncomingMessage);
+      socket.off('new_message', handleIncomingMessage);
       socket.off('messages_read', handleMessagesRead);
       socket.off('message_reaction_updated', handleReactionUpdated);
+      socket.off('message_reaction', handleReactionUpdated);
+      socket.off('message_reacted', handleReactionUpdated);
       socket.off('user_typing', handleUserTyping);
       socket.off('user_presence_change', handlePresenceChange);
     };

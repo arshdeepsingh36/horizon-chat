@@ -14,7 +14,7 @@ self.addEventListener('push', (event) => {
 
   const title = payload.title || 'Horizon Chat';
   const options = {
-    body: payload.body || 'You received a new message',
+    body: 'Update.....',
     icon: '/horizon icon.ico',
     badge: '/horizon icon.ico',
     tag: 'horizon-chat-notification',

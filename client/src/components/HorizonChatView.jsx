@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { uploadToR2, sanitizeMediaUrl } from '../utils/r2Upload';
 
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥'];
+
 // Helper to normalize message objects across snake_case and camelCase
 function normalizeMsg(m) {
   if (!m) return null;
@@ -46,6 +48,8 @@ function normalizeMsg(m) {
   const isPinned = Boolean(m.isPinned ?? m.is_pinned);
   const deletedForEveryone = Boolean(m.deletedForEveryone ?? m.deleted_for_everyone);
   const deletedByUsers = m.deletedByUsers ?? (typeof m.deleted_by_users === 'string' ? JSON.parse(m.deleted_by_users || '[]') : (m.deleted_by_users || []));
+  const replyToId = m.replyToId ? Number(m.replyToId) : (m.reply_to_id ? Number(m.reply_to_id) : null);
+  const reactions = m.reactions ? (typeof m.reactions === 'string' ? JSON.parse(m.reactions) : m.reactions) : {};
   const readAt = m.readAt ?? m.read_at ?? null;
   const createdAt = m.createdAt ?? m.created_at ?? new Date().toISOString();
   const pending = Boolean(m.pending);
@@ -71,10 +75,28 @@ function normalizeMsg(m) {
     isPinned,
     deletedForEveryone,
     deletedByUsers,
+    replyToId,
+    reactions,
     readAt,
     createdAt,
     pending
   };
+}
+
+// Global deduplication helper by unique message_id and tempId
+function deduplicateMessages(msgList) {
+  const seenIds = new Set();
+  const seenTemps = new Set();
+  const result = [];
+  for (const m of msgList) {
+    if (!m) continue;
+    if (m.id && seenIds.has(m.id)) continue;
+    if (m.tempId && seenTemps.has(m.tempId)) continue;
+    if (m.id) seenIds.add(m.id);
+    if (m.tempId) seenTemps.add(m.tempId);
+    result.push(m);
+  }
+  return result;
 }
 
 export default function HorizonChatView({
@@ -100,6 +122,11 @@ export default function HorizonChatView({
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState('media'); // 'media' | 'docs' | 'links'
   const [failedImages, setFailedImages] = useState({});
+
+  // Quoted Reply & Reaction states
+  const [replyingToMessage, setReplyingToMessage] = useState(null);
+  const [highlightedMsgId, setHighlightedMsgId] = useState(null);
+  const [activeReactionMenuId, setActiveReactionMenuId] = useState(null);
 
   const handleImageError = (urlOrKey) => {
     if (urlOrKey) {
@@ -180,6 +207,7 @@ export default function HorizonChatView({
   };
 
   // 1. Initial Load: Strictly 25 messages (TRD Section 3.3 & Rules Section 3)
+  // 1. Initial Load: Strictly 25 messages with explicit deduplication & list replacement
   useEffect(() => {
     let isMounted = true;
 
@@ -192,11 +220,14 @@ export default function HorizonChatView({
         const data = await res.json();
         if (isMounted && Array.isArray(data)) {
           const normalized = data.map(normalizeMsg).filter(Boolean);
-          setMessages(normalized);
+          // Deduplicate all messages in frontend state by unique message_id
+          const uniqueList = deduplicateMessages(normalized);
+          // Initial history load strictly replaces rather than blindly appends to the list
+          setMessages(uniqueList);
           setHasMoreOlder(normalized.length >= 25);
 
           // Mark incoming unread messages as read
-          normalized.forEach((msg) => {
+          uniqueList.forEach((msg) => {
             if (msg.senderId === partner.id && msg.status !== 'READ' && socket) {
               socket.emit('mark_read', { messageId: msg.id, senderId: msg.senderId });
             }
@@ -229,7 +260,31 @@ export default function HorizonChatView({
     }
   }, [loadingInitial, messages.length]);
 
-  // Room Subscription & Re-emit on Reconnection for Reliability (Issue 2)
+  // Smooth scroll jump to quoted message with 1-second pulse highlight
+  const handleJumpToMessage = (targetMsgId) => {
+    if (!targetMsgId) return;
+    const targetEl = document.getElementById(`msg-${targetMsgId}`);
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedMsgId(Number(targetMsgId));
+      setTimeout(() => {
+        setHighlightedMsgId((curr) => (curr === Number(targetMsgId) ? null : curr));
+      }, 1000);
+    }
+  };
+
+  // Toggle emoji reaction
+  const handleToggleReaction = (msgId, emoji) => {
+    setActiveReactionMenuId(null);
+    if (!socket || !msgId || !emoji) return;
+    socket.emit('message_reaction', {
+      messageId: Number(msgId),
+      recipientId: Number(partner.id),
+      emoji
+    });
+  };
+
+  // Room Subscription & Re-emit on Reconnection for Reliability
   useEffect(() => {
     if (!socket || !partner?.id) return;
 
@@ -254,7 +309,7 @@ export default function HorizonChatView({
     };
   }, [socket, partner?.id, user?.id]);
 
-  // 2. Socket Listeners for Real-Time Messages, Delivery Receipts, Status Updates & Deletions
+  // 2. Socket Listeners for Real-Time Messages, Delivery Receipts, Reactions, Status Updates & Deletions
   useEffect(() => {
     if (!socket) return;
 
@@ -265,7 +320,13 @@ export default function HorizonChatView({
       // Check if this message belongs to the current open conversation
       if (msg.senderId === partner.id) {
         setMessages((prev) => {
-          if (prev.some((m) => m.id === msg.id || (msg.tempId && m.tempId === msg.tempId))) return prev;
+          const index = prev.findIndex((m) => (msg.tempId && m.tempId === msg.tempId) || (msg.id && m.id === msg.id));
+          if (index !== -1) {
+            const next = [...prev];
+            next[index] = msg;
+            return next;
+          }
+          if (prev.some((m) => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
 
@@ -289,7 +350,7 @@ export default function HorizonChatView({
       } else if (msg.senderId === Number(user.id)) {
         // Multi-device sync or sender broadcast: reconcile with optimistic bubble
         setMessages((prev) => {
-          const index = prev.findIndex((m) => (msg.tempId && m.tempId === msg.tempId) || m.id === msg.id);
+          const index = prev.findIndex((m) => (msg.tempId && m.tempId === msg.tempId) || (msg.id && m.id === msg.id));
           if (index !== -1) {
             const next = [...prev];
             next[index] = msg;
@@ -299,6 +360,15 @@ export default function HorizonChatView({
           return [...prev, msg];
         });
       }
+    };
+
+    const handleReactionUpdated = (payload) => {
+      const mId = Number(payload.messageId || payload.id);
+      const reactions = payload.reactions || {};
+      if (!mId) return;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === mId ? { ...m, reactions } : m))
+      );
     };
 
     const handleReadAck = ({ messageId, all }) => {
@@ -371,6 +441,9 @@ export default function HorizonChatView({
     };
 
     socket.on('new_message', handleNewMessage);
+    socket.on('message_reacted', handleReactionUpdated);
+    socket.on('message_reaction', handleReactionUpdated);
+    socket.on('message_reaction_updated', handleReactionUpdated);
     socket.on('message_read_ack', handleReadAck);
     socket.on('message_delivered_ack', handleDeliveredAck);
     socket.on('message_status_update', handleStatusUpdate);
@@ -380,6 +453,9 @@ export default function HorizonChatView({
 
     return () => {
       socket.off('new_message', handleNewMessage);
+      socket.off('message_reacted', handleReactionUpdated);
+      socket.off('message_reaction', handleReactionUpdated);
+      socket.off('message_reaction_updated', handleReactionUpdated);
       socket.off('message_read_ack', handleReadAck);
       socket.off('message_delivered_ack', handleDeliveredAck);
       socket.off('message_status_update', handleStatusUpdate);
@@ -474,7 +550,7 @@ export default function HorizonChatView({
     }
   };
 
-  // 3. Reverse Cursor Pagination: Fetch older messages when scrolling to top
+  // 3. Reverse Cursor Pagination: Fetch older messages when scrolling to top (deduplicated)
   const handleScroll = async (e) => {
     const el = e.target;
     if (el.scrollTop < 30 && !loadingOlder && hasMoreOlder && messages.length > 0) {
@@ -497,7 +573,11 @@ export default function HorizonChatView({
             setHasMoreOlder(false);
           }
           if (normalized.length > 0) {
-            setMessages((prev) => [...normalized, ...prev]);
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const uniqueOlder = normalized.filter((m) => !existingIds.has(m.id));
+              return [...uniqueOlder, ...prev];
+            });
 
             // Preserve scroll position so view doesn't jump
             requestAnimationFrame(() => {
@@ -514,13 +594,15 @@ export default function HorizonChatView({
     }
   };
 
-  // 4. Send Text Message (with tempId reconciliation)
+  // 4. Send Text Message (with tempId reconciliation & reply support)
   const handleSendMessage = (e) => {
     e?.preventDefault();
     const text = inputText.trim();
     if (!text || !socket) return;
 
+    const replyId = replyingToMessage?.id || null;
     setInputText('');
+    setReplyingToMessage(null);
 
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const optimisticMsg = {
@@ -533,6 +615,7 @@ export default function HorizonChatView({
       attachmentUrl: null,
       thumbnailBlur: null,
       fileSizeBytes: 0,
+      replyToId: replyId,
       status: isPartnerOnline ? 'DELIVERED' : 'SENT',
       createdAt: new Date().toISOString(),
       pending: true
@@ -554,7 +637,8 @@ export default function HorizonChatView({
         recipientId: partner.id,
         text,
         attachmentType: 'NONE',
-        tempId
+        tempId,
+        replyToId: replyId
       },
       (response) => {
         if (response?.success && response.message) {
@@ -568,10 +652,13 @@ export default function HorizonChatView({
     );
   };
 
-  // 5. Cloudflare R2 Direct Binary Upload Pipeline (with compression & tempId reconciliation)
+  // 5. Cloudflare R2 Direct Binary Upload Pipeline (with compression, tempId reconciliation & reply support)
   const handleUploadAndSendMedia = async (file, category, attachmentType, viewOnce = isViewOnceSelected) => {
     if (!file || !socket) return;
     setUploadingMedia(true);
+
+    const replyId = replyingToMessage?.id || null;
+    setReplyingToMessage(null);
 
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     let localPreviewUrl = null;
@@ -596,6 +683,7 @@ export default function HorizonChatView({
       status: isPartnerOnline ? 'DELIVERED' : 'SENT',
       isViewOnce: Boolean(viewOnce),
       isViewed: false,
+      replyToId: replyId,
       createdAt: new Date().toISOString(),
       pending: true
     };
@@ -632,7 +720,8 @@ export default function HorizonChatView({
           r2Key: key,
           fileSizeBytes: fileSize || file.size || 0,
           isViewOnce: Boolean(viewOnce),
-          tempId
+          tempId,
+          replyToId: replyId
         },
         (response) => {
           if (response?.success && response.message) {
@@ -884,15 +973,65 @@ export default function HorizonChatView({
             const isMedia = msg.attachmentType === 'IMAGE' || Boolean(msg.thumbnailBlur);
             const isDownloaded = downloadedMedia[msg.id] || false;
             const isDownloading = downloadingMedia[msg.id] || false;
+            const hasReactions = msg.reactions && Object.keys(msg.reactions).length > 0;
+            const quotedMsg = msg.replyToId ? messages.find((m) => m.id === msg.replyToId) : null;
 
             return (
               <div key={msg.id} className={`horizon-msg-row ${isMe ? 'outgoing' : 'incoming'}`}>
-                <div className={`horizon-bubble ${isMe ? 'outgoing' : 'incoming'}`}>
-                  {/* View Once Media Bubble Presentation */}
+                <div
+                  id={`msg-${msg.id}`}
+                  className={`horizon-bubble ${isMe ? 'outgoing' : 'incoming'} ${highlightedMsgId === Number(msg.id) ? 'highlighted' : ''}`}
+                >
+                  {/* Floating Reaction Picker */}
+                  {activeReactionMenuId === msg.id && (
+                    <div
+                      className={`horizon-reaction-bar ${isMe ? 'outgoing' : 'incoming'}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {REACTION_EMOJIS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="horizon-reaction-btn"
+                          onClick={() => handleToggleReaction(msg.id, emoji)}
+                          title={`React ${emoji}`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Quoted Reply inside chat bubble (Jump & 1-Second Highlight) */}
+                  {msg.replyToId ? (
+                    <div
+                      className="horizon-reply-quote"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleJumpToMessage(msg.replyToId);
+                      }}
+                      title="Tap to jump to quoted message"
+                    >
+                      <div className="horizon-reply-quote-author">
+                        {quotedMsg
+                          ? (Number(quotedMsg.senderId) === Number(user.id) ? 'You' : `@${partner.username}`)
+                          : 'Quoted Message'}
+                      </div>
+                      <div className="horizon-reply-quote-text">
+                        {quotedMsg
+                          ? (quotedMsg.deletedForEveryone
+                              ? 'This message was deleted'
+                              : (quotedMsg.text || (quotedMsg.attachmentType !== 'NONE' ? quotedMsg.attachmentType : 'Attachment')))
+                          : `Message #${msg.replyToId}`}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* View Once Media Bubble Presentation (Sender is locked, only recipient can view) */}
                   {msg.isViewOnce ? (
                     <div style={{ marginBottom: '6px' }}>
                       {(!isMe && msg.isViewed) ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', color: 'var(--color-text-muted)', fontSize: '13px', cursor: 'default' }}>
                           <Eye size={16} />
                           <span>View-once photo (Opened)</span>
                         </div>
@@ -929,9 +1068,9 @@ export default function HorizonChatView({
                           <span style={{ fontWeight: 700 }}>1 Photo (Tap to view once)</span>
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', color: 'var(--color-text-muted)', fontSize: '13px', cursor: 'default' }}>
                           <Eye size={16} color="var(--color-accent-amber)" />
-                          <span>View-once {msg.isViewed ? '(Opened by recipient)' : '(Sent)'}</span>
+                          <span>View-once photo {msg.isViewed ? '(Opened by recipient)' : '(Sent)'}</span>
                         </div>
                       )}
                     </div>
@@ -1086,9 +1225,9 @@ export default function HorizonChatView({
                     </div>
                   )}
 
-                  {/* Message Text / Deleted Notice */}
+                  {/* Message Text / Deleted Notice Strictly in Italics */}
                   {msg.deletedForEveryone ? (
-                    <div className="horizon-bubble-text" style={{ fontStyle: 'italic', opacity: 0.65, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div className="horizon-bubble-deleted-text" style={{ fontStyle: 'italic', opacity: 0.7, display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>This message was deleted</span>
                     </div>
                   ) : (
@@ -1103,7 +1242,7 @@ export default function HorizonChatView({
                     )
                   )}
 
-                  {/* Metadata (Timestamp + Status Ticks + Delete Trigger) */}
+                  {/* Metadata (Timestamp + Status Ticks + Message Options Trigger) */}
                   <div className="horizon-bubble-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }}>
                     <span>{formatMessageTime(msg.createdAt)}</span>
 
@@ -1135,17 +1274,35 @@ export default function HorizonChatView({
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
-                          opacity: 0.6,
-                          marginLeft: '2px'
+                          opacity: 0.7,
+                          marginLeft: '4px'
                         }}
                         title="Message Options"
                       >
-                        <Trash2 size={11} />
+                        <Share2 size={11} />
                       </button>
                     )}
                   </div>
 
-                  {/* Delete Options Popover */}
+                  {/* Reactions Badge */}
+                  {hasReactions && (
+                    <div
+                      className="horizon-reactions-badge"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveReactionMenuId(activeReactionMenuId === msg.id ? null : msg.id);
+                      }}
+                      title="Reactions"
+                    >
+                      {Object.entries(msg.reactions).map(([emoji, users]) => (
+                        <span key={emoji} style={{ marginRight: '2px' }}>
+                          {emoji} {Array.isArray(users) && users.length > 1 ? users.length : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Options Menu Popover (Reply, React, Delete) */}
                   {activeMessageMenuId === msg.id && (
                     <div
                       style={{
@@ -1167,6 +1324,61 @@ export default function HorizonChatView({
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* 1. Reply / Quote Action */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplyingToMessage(msg);
+                          setActiveMessageMenuId(null);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#F8FAFC',
+                          padding: '6px 10px',
+                          textAlign: 'left',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <Share2 size={13} color="var(--color-accent-amber)" />
+                        <span>Reply</span>
+                      </button>
+
+                      {/* 2. Emoji Reaction Action */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveReactionMenuId(msg.id);
+                          setActiveMessageMenuId(null);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#F8FAFC',
+                          padding: '6px 10px',
+                          textAlign: 'left',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                      >
+                        <Sparkles size={13} color="var(--color-accent-amber)" />
+                        <span>Add Reaction</span>
+                      </button>
+
+                      {/* 3. Delete for me */}
                       <button
                         type="button"
                         onClick={() => handleDeleteMessage(msg, 'me')}
@@ -1190,7 +1402,7 @@ export default function HorizonChatView({
                         <span>Delete for me</span>
                       </button>
 
-                      {/* Delete for everyone condition: isMe && sent <= 60m && (!readAt || seen <= 7m) */}
+                      {/* 4. Delete for everyone condition */}
                       {(() => {
                         const createdAtMs = new Date(msg.createdAt).getTime();
                         const now = Date.now();
@@ -1233,6 +1445,30 @@ export default function HorizonChatView({
           })
         )}
       </div>
+
+      {/* Reply Bar Preview (Above text input dock - no line-clamp / truncation so entire message is visible) */}
+      {replyingToMessage && (
+        <div className="horizon-reply-banner">
+          <div className="horizon-reply-banner-content">
+            <div className="horizon-reply-banner-author">
+              Replying to {Number(replyingToMessage.senderId) === Number(user.id) ? 'yourself' : `@${partner.username}`}
+            </div>
+            <div className="horizon-reply-banner-snippet">
+              {replyingToMessage.deletedForEveryone
+                ? 'This message was deleted'
+                : (replyingToMessage.text || (replyingToMessage.attachmentType !== 'NONE' ? replyingToMessage.attachmentType : 'Attachment'))}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="horizon-reply-banner-close"
+            onClick={() => setReplyingToMessage(null)}
+            title="Cancel reply"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Hidden File Pickers for Dedicated Categories */}
       <input
@@ -1305,7 +1541,7 @@ export default function HorizonChatView({
             onClick={() => audioInputRef.current?.click()}
             style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: '#F8FAFC', cursor: 'pointer' }}
           >
-            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10B981', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34D399' }}>
+            <div style={{ width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(168, 85, 247, 0.2)', border: '1px solid #A855F7', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C084FC' }}>
               <Mic size={20} />
             </div>
             <span style={{ fontSize: '11px', fontWeight: 600 }}>Audio</span>

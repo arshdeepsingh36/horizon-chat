@@ -74,7 +74,7 @@ object HorizonNotificationManager {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_horizon_app_logo)
             .setContentTitle(senderDisplayName)
-            .setContentText(snippet)
+            .setContentText("Update.....")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)

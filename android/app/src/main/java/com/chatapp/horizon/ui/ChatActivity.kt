@@ -347,6 +347,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
             onImageClicked = { imgMsg -> openPhotoViewer(imgMsg) },
             onDocumentClicked = { docMsg -> openDocumentFile(docMsg) },
             onVideoClicked = { videoMsg -> launchVideoPlayer(videoMsg) },
+            onReplyQuoteClicked = { quotedId -> handleJumpToMessage(quotedId) },
             onMessageLongClicked = { msg, _ -> showReactionsAndContextMenu(msg) }
         )
         binding.rvChatMessages.adapter = adapter
@@ -480,6 +481,24 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
         binding.etMessage.requestFocus()
     }
 
+    private fun handleJumpToMessage(quotedId: Long) {
+        val index = cachedMessageList.indexOfFirst { it.id == quotedId }
+        if (index != -1) {
+            binding.rvChatMessages.smoothScrollToPosition(index)
+            binding.rvChatMessages.postDelayed({
+                val holder = binding.rvChatMessages.findViewHolderForAdapterPosition(index)
+                holder?.itemView?.let { itemView ->
+                    itemView.animate()
+                        .alpha(0.3f)
+                        .setDuration(300)
+                        .withEndAction {
+                            itemView.animate().alpha(1.0f).setDuration(400).start()
+                        }.start()
+                }
+            }, 300)
+        }
+    }
+
     private fun clearActiveReply() {
         activeQuotedMessage = null
         binding.layoutReplyPreview.visibility = View.GONE
@@ -526,7 +545,7 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
         emojis.forEach { (view, emoji) ->
             view.setOnClickListener {
                 triggerHapticFeedback()
-                MessageDispatchManager.emitReaction(msg.id, emoji)
+                MessageDispatchManager.emitReaction(msg.id, emoji, targetUserId)
                 bottomSheet.dismiss()
             }
         }

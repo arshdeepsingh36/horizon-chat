@@ -27,6 +27,7 @@ import com.chatapp.horizon.utils.TimeFormatHelper
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
+import android.graphics.Typeface
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -43,6 +44,7 @@ class ChatAdapter(
     private val onImageClicked: (ChatMessage) -> Unit = {},
     private val onDocumentClicked: (ChatMessage) -> Unit = {},
     private val onVideoClicked: (ChatMessage) -> Unit = {},
+    private val onReplyQuoteClicked: (Long) -> Unit = {},
     private val onMessageLongClicked: (ChatMessage, View) -> Unit = { _, _ -> }
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -79,20 +81,38 @@ class ChatAdapter(
 
     fun setMessages(newMessages: List<ChatMessage>) {
         messages.clear()
-        messages.addAll(newMessages)
+        val seenIds = HashSet<Long>()
+        val seenClients = HashSet<String>()
+        val deduped = mutableListOf<ChatMessage>()
+        for (m in newMessages) {
+            val cid = m.localClientId
+            if (m.id > 0 && !seenIds.add(m.id)) continue
+            if (!cid.isNullOrEmpty() && !seenClients.add(cid)) continue
+            deduped.add(m)
+        }
+        messages.addAll(deduped)
         trimToMaxHeap()
         notifyDataSetChanged()
     }
 
     fun prependMessages(olderMessages: List<ChatMessage>) {
-        messages.addAll(0, olderMessages)
+        val existingIds = messages.map { it.id }.toSet()
+        val existingClients = messages.mapNotNull { it.localClientId }.toSet()
+        val toPrepend = olderMessages.filter { m ->
+            val cid = m.localClientId
+            (m.id <= 0 || !existingIds.contains(m.id)) &&
+            (cid.isNullOrEmpty() || !existingClients.contains(cid))
+        }
+        messages.addAll(0, toPrepend)
         trimToMaxHeap()
-        notifyItemRangeInserted(0, olderMessages.size)
+        notifyItemRangeInserted(0, toPrepend.size)
     }
 
     fun appendMessage(message: ChatMessage) {
+        val msgCid = message.localClientId
         val existingIndex = messages.indexOfFirst {
-            it.id == message.id || (message.localClientId != null && it.localClientId == message.localClientId)
+            (message.id > 0 && it.id == message.id) ||
+            (!msgCid.isNullOrEmpty() && it.localClientId == msgCid)
         }
         if (existingIndex != -1) {
             messages[existingIndex] = message
@@ -240,8 +260,8 @@ class ChatAdapter(
         }
 
         when (holder) {
-            is SentTextViewHolder -> holder.bind(msg, ::findMessageById)
-            is ReceivedTextViewHolder -> holder.bind(msg, ::findMessageById)
+            is SentTextViewHolder -> holder.bind(msg, ::findMessageById, onReplyQuoteClicked)
+            is ReceivedTextViewHolder -> holder.bind(msg, ::findMessageById, onReplyQuoteClicked)
             is MediaViewHolder -> holder.bind(msg, isSent, onMediaDownloadClicked, onViewOnceClicked, onImageClicked)
             is VideoViewHolder -> holder.bind(msg, isSent)
             is VoiceViewHolder -> holder.bind(msg, isSent, msg.id == activePlayingMsgId && activeMediaPlayer?.isPlaying == true)
@@ -439,8 +459,16 @@ class ChatAdapter(
 
     class SentTextViewHolder(private val binding: ItemMessageSentBinding) :
         RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage, findQuote: (Long) -> ChatMessage?) {
+        fun bind(msg: ChatMessage, findQuote: (Long) -> ChatMessage?, onReplyQuoteClicked: (Long) -> Unit) {
             binding.tvMessageBody.text = msg.messageText ?: ""
+            if (msg.deletedForEveryone) {
+                binding.tvMessageBody.setTypeface(null, Typeface.ITALIC)
+                binding.tvMessageBody.setTextColor(ContextCompat.getColor(itemView.context, R.color.text_muted))
+            } else {
+                binding.tvMessageBody.setTypeface(null, Typeface.NORMAL)
+                binding.tvMessageBody.setTextColor(ContextCompat.getColor(itemView.context, R.color.text_primary))
+            }
+
             binding.tvTimestamp.text = TimeFormatHelper.formatMessageTime(msg.createdAt)
             updateTicks(binding.ivTicks, msg.status)
 
@@ -451,8 +479,12 @@ class ChatAdapter(
                 binding.layoutReplyQuote.visibility = View.VISIBLE
                 binding.tvQuoteAuthor.text = if (quoted?.senderId == msg.senderId) "You" else "User"
                 binding.tvQuoteText.text = quoted?.messageText ?: "Quoted message"
+                binding.layoutReplyQuote.setOnClickListener {
+                    onReplyQuoteClicked(msg.replyToId)
+                }
             } else {
                 binding.layoutReplyQuote.visibility = View.GONE
+                binding.layoutReplyQuote.setOnClickListener(null)
             }
 
             val rxText = formatReactions(msg.reactions)
@@ -467,8 +499,16 @@ class ChatAdapter(
 
     class ReceivedTextViewHolder(private val binding: ItemMessageReceivedBinding) :
         RecyclerView.ViewHolder(binding.root) {
-        fun bind(msg: ChatMessage, findQuote: (Long) -> ChatMessage?) {
+        fun bind(msg: ChatMessage, findQuote: (Long) -> ChatMessage?, onReplyQuoteClicked: (Long) -> Unit) {
             binding.tvReceivedMessageBody.text = msg.messageText ?: ""
+            if (msg.deletedForEveryone) {
+                binding.tvReceivedMessageBody.setTypeface(null, Typeface.ITALIC)
+                binding.tvReceivedMessageBody.setTextColor(ContextCompat.getColor(itemView.context, R.color.text_muted))
+            } else {
+                binding.tvReceivedMessageBody.setTypeface(null, Typeface.NORMAL)
+                binding.tvReceivedMessageBody.setTextColor(ContextCompat.getColor(itemView.context, R.color.text_primary))
+            }
+
             binding.tvReceivedTimestamp.text = TimeFormatHelper.formatMessageTime(msg.createdAt)
 
             binding.layoutReceivedPinned.visibility = if (msg.isPinned) View.VISIBLE else View.GONE
@@ -478,8 +518,12 @@ class ChatAdapter(
                 binding.layoutReceivedReplyQuote.visibility = View.VISIBLE
                 binding.tvReceivedQuoteAuthor.text = if (quoted?.senderId == msg.senderId) "User" else "You"
                 binding.tvReceivedQuoteText.text = quoted?.messageText ?: "Quoted message"
+                binding.layoutReceivedReplyQuote.setOnClickListener {
+                    onReplyQuoteClicked(msg.replyToId)
+                }
             } else {
                 binding.layoutReceivedReplyQuote.visibility = View.GONE
+                binding.layoutReceivedReplyQuote.setOnClickListener(null)
             }
 
             val rxText = formatReactions(msg.reactions)
@@ -527,21 +571,32 @@ class ChatAdapter(
                 binding.viewOnceOverlay.visibility = View.VISIBLE
                 binding.ivThumbnail.setImageDrawable(null)
 
-                if (msg.isViewed) {
-                    binding.ivViewOnceIcon.setImageResource(R.drawable.ic_view_once_opened)
-                    binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.text_muted))
-                    binding.tvViewOnceStatus.text = "Opened"
-                    binding.tvViewOnceSub.text = "Expired"
-                    binding.viewOnceOverlay.setOnClickListener {
-                        Toast.makeText(context, "This photo has already been opened.", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
+                if (isSent) {
+                    // Sender cannot open view-once photos/videos
                     binding.ivViewOnceIcon.setImageResource(R.drawable.ic_view_once)
-                    binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.accent_amber))
+                    binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.text_muted))
                     binding.tvViewOnceStatus.text = "1 Photo (View Once)"
-                    binding.tvViewOnceSub.text = "Tap to open"
-                    binding.viewOnceOverlay.setOnClickListener {
-                        onViewOnceClicked(msg)
+                    binding.tvViewOnceSub.text = if (msg.isViewed) "Opened by recipient" else "Delivered"
+                    binding.viewOnceOverlay.setOnClickListener(null)
+                    binding.viewOnceOverlay.isClickable = false
+                } else {
+                    binding.viewOnceOverlay.isClickable = true
+                    if (msg.isViewed) {
+                        binding.ivViewOnceIcon.setImageResource(R.drawable.ic_view_once_opened)
+                        binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.text_muted))
+                        binding.tvViewOnceStatus.text = "Opened"
+                        binding.tvViewOnceSub.text = "Expired"
+                        binding.viewOnceOverlay.setOnClickListener {
+                            Toast.makeText(context, "This photo has already been opened.", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        binding.ivViewOnceIcon.setImageResource(R.drawable.ic_view_once)
+                        binding.ivViewOnceIcon.setColorFilter(ContextCompat.getColor(context, R.color.accent_amber))
+                        binding.tvViewOnceStatus.text = "1 Photo (View Once)"
+                        binding.tvViewOnceSub.text = "Tap to open"
+                        binding.viewOnceOverlay.setOnClickListener {
+                            onViewOnceClicked(msg)
+                        }
                     }
                 }
                 return

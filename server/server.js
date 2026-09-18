@@ -1135,32 +1135,51 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Message Reactions (Phase 2C Step 3)
-  socket.on('message_reaction', async ({ messageId, recipientId, emoji }) => {
+  // Message Reactions (Real-Time Synchronized across Android and Web)
+  const handleReactionEvent = async ({ messageId, recipientId, emoji }) => {
     if (!messageId || !emoji) return;
     try {
       const updated = await toggleMessageReaction(Number(messageId), userId, emoji);
       if (updated) {
+        const sId = Number(updated.senderId);
+        const uRecipientId = Number(updated.recipientId);
+        const partnerId = sId === userId ? (recipientId ? Number(recipientId) : uRecipientId) : sId;
         const payload = {
           messageId: Number(messageId),
-          reactions: updated.reactions,
+          id: Number(messageId),
+          reactions: updated.reactions || {},
           userId,
-          emoji
+          emoji,
+          message: updated
         };
-        const rId = Number(recipientId);
-        const rSockets = onlineUsers.get(rId);
+
+        const broadcast = (sockId) => {
+          io.to(sockId).emit('message_reacted', payload);
+          io.to(sockId).emit('message_reaction', payload);
+          io.to(sockId).emit('message_reaction_updated', payload);
+        };
+
+        const rSockets = onlineUsers.get(partnerId);
         if (rSockets) {
-          rSockets.forEach(sId => io.to(sId).emit('message_reacted', payload));
+          rSockets.forEach(broadcast);
         }
         const sSockets = onlineUsers.get(userId);
         if (sSockets) {
-          sSockets.forEach(sId => io.to(sId).emit('message_reacted', payload));
+          sSockets.forEach(broadcast);
         }
+        const convRoom = `chat_${Math.min(userId, partnerId)}_${Math.max(userId, partnerId)}`;
+        io.to(convRoom).emit('message_reacted', payload);
+        io.to(convRoom).emit('message_reaction', payload);
+        io.to(convRoom).emit('message_reaction_updated', payload);
       }
     } catch (err) {
       console.error('[REACTION ERROR]', err);
     }
-  });
+  };
+
+  socket.on('message_reaction', handleReactionEvent);
+  socket.on('add_reaction', handleReactionEvent);
+  socket.on('toggle_reaction', handleReactionEvent);
 
   // Delete Message (Server-Side Time Validation: 60m sent, 7m read)
   socket.on('delete_message', async (data, callback) => {

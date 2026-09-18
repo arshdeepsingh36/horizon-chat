@@ -164,25 +164,32 @@ object MessageDispatchManager {
                     }
                 }
 
-                on("message_reaction") { args ->
+                val handleReactionEvent = { args: Array<Any> ->
                     if (args.isNotEmpty()) {
-                        val data = args[0] as? JSONObject ?: return@on
-                        val mId = data.optLong("messageId")
-                        val rxJson = data.optJSONObject("reactions")
-                        val reactionsMap = mutableMapOf<String, List<Int>>()
-                        rxJson?.keys()?.forEach { emoji ->
-                            val arr = rxJson.optJSONArray(emoji)
-                            val userIds = mutableListOf<Int>()
-                            if (arr != null) {
-                                for (i in 0 until arr.length()) {
-                                    userIds.add(arr.optInt(i))
+                        val data = args[0] as? JSONObject
+                        if (data != null) {
+                            val mId = data.optLong("messageId", data.optLong("message_id", -1L))
+                            val rxJson = data.optJSONObject("reactions")
+                            val reactionsMap = mutableMapOf<String, List<Int>>()
+                            rxJson?.keys()?.forEach { emoji ->
+                                val arr = rxJson.optJSONArray(emoji)
+                                val userIds = mutableListOf<Int>()
+                                if (arr != null) {
+                                    for (i in 0 until arr.length()) {
+                                        userIds.add(arr.optInt(i))
+                                    }
                                 }
+                                reactionsMap[emoji] = userIds
                             }
-                            reactionsMap[emoji] = userIds
+                            if (mId > 0) {
+                                listeners.forEach { it.onMessageReactionUpdated(mId, reactionsMap) }
+                            }
                         }
-                        listeners.forEach { it.onMessageReactionUpdated(mId, reactionsMap) }
                     }
                 }
+                on("message_reaction", handleReactionEvent)
+                on("message_reacted", handleReactionEvent)
+                on("message_reaction_updated", handleReactionEvent)
 
                 on("message_deleted") { args ->
                     if (args.isNotEmpty()) {
@@ -328,11 +335,20 @@ object MessageDispatchManager {
         }
     }
 
-    fun emitReaction(messageId: Long, emoji: String) {
-        globalSocket?.emit("message_reaction", JSONObject().apply {
+    fun emitReaction(messageId: Long, emoji: String, recipientId: Int = 0) {
+        val payload = JSONObject().apply {
             put("messageId", messageId)
+            put("message_id", messageId)
             put("emoji", emoji)
-        })
+            put("reaction", emoji)
+            if (recipientId > 0) {
+                put("recipientId", recipientId)
+                put("recipient_id", recipientId)
+            }
+        }
+        globalSocket?.emit("message_reaction", payload)
+        globalSocket?.emit("toggle_reaction", payload)
+        globalSocket?.emit("add_reaction", payload)
     }
 
     fun emitDelete(messageId: Long, recipientId: Int = 0, deleteForEveryone: Boolean = false) {

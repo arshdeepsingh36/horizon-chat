@@ -298,9 +298,7 @@
                     android:layout_height="wrap_content"
                     android:text="Message snippet"
                     android:textColor="@color/text_primary"
-                    android:textSize="12sp"
-                    android:maxLines="1"
-                    android:ellipsize="end" />
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <ImageView
