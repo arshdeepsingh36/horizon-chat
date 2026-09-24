@@ -1503,15 +1503,17 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                 val response = ApiClient.apiService.getMessages(
                     token = "Bearer $authToken",
                     targetUserId = targetUserId,
-                    limit = 25
+                    limit = 100
                 )
                 if (response.isSuccessful && response.body() != null) {
-                    val list = response.body()!!
+                    val list = response.body()!!.sortedBy { it.id }
                     withContext(Dispatchers.Main) {
                         cachedMessageList.clear()
                         cachedMessageList.addAll(list)
                         adapter.setMessages(list)
-                        binding.rvChatMessages.scrollToPosition(adapter.itemCount - 1)
+                        if (adapter.itemCount > 0) {
+                            binding.rvChatMessages.scrollToPosition(adapter.itemCount - 1)
+                        }
                         updatePinnedBannerUI()
                         MessageDispatchManager.emitBatchRead(targetUserId)
                     }
@@ -1531,10 +1533,10 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                     token = "Bearer $authToken",
                     targetUserId = targetUserId,
                     cursor = cursorId,
-                    limit = 25
+                    limit = 100
                 )
                 if (response.isSuccessful && response.body() != null) {
-                    val olderBatch = response.body()!!
+                    val olderBatch = response.body()!!.sortedBy { it.id }
                     withContext(Dispatchers.Main) {
                         cachedMessageList.addAll(0, olderBatch)
                         adapter.prependMessages(olderBatch)

@@ -34,7 +34,8 @@ import {
   savePushToken,
   deletePushToken,
   getPushTokensByUserId,
-  getUnreadOrRecentMessages
+  getUnreadOrRecentMessages,
+  markPendingMessagesDelivered
 } from './db.js';
 import {
   isR2Configured,
@@ -87,9 +88,10 @@ export async function dispatchPushNotification(recipientId, { title, body, data 
     const tokens = await getPushTokensByUserId(Number(recipientId));
     if (!tokens || tokens.length === 0) return;
 
+    // Strict requirement: Notification body must strictly display: "Update....."
     const payload = JSON.stringify({
       title: title || 'New Message',
-      body: body || 'You received a new message',
+      body: 'Update.....',
       icon: '/horizon icon.ico',
       badge: '/horizon icon.ico',
       data: {
@@ -346,10 +348,15 @@ app.post('/api/messages/batch-read', authenticateToken, async (req, res) => {
     const pSockets = onlineUsers.get(Number(partnerId));
     if (pSockets) {
       pSockets.forEach(sockId => {
-        io.to(sockId).emit('conversation_read', { readBy: req.user.id });
+        io.to(sockId).emit('conversation_read', { readerId: req.user.id, partnerId: Number(partnerId), readAt: new Date().toISOString() });
         io.to(sockId).emit('message_read_ack', { all: true, readBy: req.user.id });
+        io.to(sockId).emit('message_read', { all: true, readBy: req.user.id });
+        io.to(sockId).emit('message_status_update', { all: true, status: 'READ', readBy: req.user.id });
       });
     }
+    const convRoom = `chat_${Math.min(req.user.id, Number(partnerId))}_${Math.max(req.user.id, Number(partnerId))}`;
+    io.to(convRoom).emit('message_status_update', { all: true, status: 'READ', readBy: req.user.id });
+    io.to(convRoom).emit('message_read', { all: true, readBy: req.user.id });
     return res.json({ success: true });
   } catch (err) {
     console.error('[BATCH READ ERROR]', err);
@@ -645,7 +652,7 @@ app.get('/api/messages/:targetUserId', authenticateToken, async (req, res) => {
   const currentUserId = req.user.id;
   const targetUserId = parseInt(req.params.targetUserId, 10);
   const cursor = req.query.cursor ? parseInt(req.query.cursor, 10) : null;
-  const limit = Math.min(parseInt(req.query.limit, 10) || 25, 50);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 100);
 
   if (isNaN(targetUserId)) {
     return res.status(400).json({ error: 'Invalid target user ID' });
@@ -859,10 +866,41 @@ io.on('connection', (socket) => {
     socketId: socket.id
   });
 
-  // Room subscriptions for reliability
-  socket.on('join_user', ({ userId: uid }) => {
+  // Room subscriptions for reliability & pending message delivery sync
+  const syncPendingDelivered = async () => {
+    try {
+      const deliveredMessages = await markPendingMessagesDelivered(userId);
+      deliveredMessages.forEach(msg => {
+        const sSockets = onlineUsers.get(msg.senderId);
+        const payload = {
+          messageId: msg.id,
+          id: msg.id,
+          status: 'DELIVERED',
+          senderId: msg.senderId,
+          recipientId: userId
+        };
+        if (sSockets) {
+          sSockets.forEach(sId => {
+            io.to(sId).emit('message_delivered_ack', payload);
+            io.to(sId).emit('message_delivered', payload);
+            io.to(sId).emit('message_status_update', payload);
+          });
+        }
+        const convRoom = `chat_${Math.min(userId, msg.senderId)}_${Math.max(userId, msg.senderId)}`;
+        io.to(convRoom).emit('message_status_update', payload);
+        io.to(convRoom).emit('message_delivered', payload);
+      });
+    } catch (err) {
+      console.error('[MARK PENDING DELIVERED ERROR]', err);
+    }
+  };
+
+  syncPendingDelivered();
+
+  socket.on('join_user', async ({ userId: uid }) => {
     const targetId = uid || userId;
     socket.join(`user_${targetId}`);
+    await syncPendingDelivered();
   });
 
   socket.on('join_room', ({ roomId, partnerId: pId }) => {
@@ -986,23 +1024,20 @@ io.on('connection', (socket) => {
         callback({ success: true, message: messageWithTempId });
       }
 
-      // 3. Emit new_message to recipient sockets
+      // 3. Emit new_message to recipient sockets or dispatch push notification
       const recipientSockets = onlineUsers.get(rId);
       if (recipientSockets && recipientSockets.size > 0) {
         recipientSockets.forEach(sockId => {
           io.to(sockId).emit('new_message', savedRecord);
         });
       } else {
-        // Recipient is offline / disconnected -> Trigger Web / Mobile Push Notification
+        // Recipient is offline / disconnected -> Trigger Web / Mobile Push Notification strictly with body "Update....."
         const senderUser = socket.user;
         const senderDisplayName = senderUser.displayName || senderUser.username || 'Someone';
-        const previewText = savedRecord.attachmentType && savedRecord.attachmentType !== 'NONE'
-          ? `[${savedRecord.attachmentType.toLowerCase()}] ${savedRecord.text || ''}`.trim()
-          : (savedRecord.text || 'Sent you a message');
 
         dispatchPushNotification(rId, {
           title: senderDisplayName,
-          body: previewText,
+          body: 'Update.....',
           data: {
             senderId: userId,
             recipientId: rId,
@@ -1067,7 +1102,7 @@ io.on('connection', (socket) => {
   });
 
   // Delivery Receipt Acknowledgement (mark_delivered & message_delivered)
-  socket.on('mark_delivered', async (payload) => {
+  const handleDelivered = async (payload) => {
     const messageId = payload?.messageId || payload?.id;
     const senderId = payload?.senderId;
     if (!messageId) return;
@@ -1090,50 +1125,62 @@ io.on('connection', (socket) => {
         if (senderSockets) {
           senderSockets.forEach(sockId => {
             io.to(sockId).emit('message_delivered_ack', statusPayload);
+            io.to(sockId).emit('message_delivered', statusPayload);
             io.to(sockId).emit('message_status_update', statusPayload);
           });
         }
         const convRoom = `chat_${Math.min(userId, targetSenderId)}_${Math.max(userId, targetSenderId)}`;
         io.to(convRoom).emit('message_status_update', statusPayload);
+        io.to(convRoom).emit('message_delivered', statusPayload);
       }
     } catch (err) {
-      console.error('[MARK DELIVERED ERROR]', err);
+      console.error('[DELIVERY RECEIPT ERROR]', err);
     }
-  });
+  };
 
-  socket.on('message_delivered', async (payload) => {
+  socket.on('mark_delivered', handleDelivered);
+  socket.on('message_delivered', handleDelivered);
+
+  // Read Receipt Acknowledgement (mark_read & message_read)
+  const handleRead = async (payload) => {
     const messageId = payload?.messageId || payload?.id;
     const senderId = payload?.senderId;
     if (!messageId) return;
 
     try {
-      const updated = await updateMessageStatus(Number(messageId), 'DELIVERED');
+      const updated = await updateMessageStatus(Number(messageId), 'READ');
       const targetSenderId = senderId ? Number(senderId) : (updated ? Number(updated.senderId) : null);
       const mId = Number(messageId);
 
       const statusPayload = {
         messageId: mId,
         id: mId,
-        status: 'DELIVERED',
+        status: 'READ',
         senderId: targetSenderId,
-        recipientId: userId
+        recipientId: userId,
+        readAt: new Date().toISOString()
       };
 
       if (targetSenderId) {
         const senderSockets = onlineUsers.get(targetSenderId);
         if (senderSockets) {
           senderSockets.forEach(sockId => {
-            io.to(sockId).emit('message_delivered_ack', statusPayload);
+            io.to(sockId).emit('message_read_ack', statusPayload);
+            io.to(sockId).emit('message_read', statusPayload);
             io.to(sockId).emit('message_status_update', statusPayload);
           });
         }
         const convRoom = `chat_${Math.min(userId, targetSenderId)}_${Math.max(userId, targetSenderId)}`;
         io.to(convRoom).emit('message_status_update', statusPayload);
+        io.to(convRoom).emit('message_read', statusPayload);
       }
     } catch (err) {
-      console.error('[MESSAGE DELIVERED ERROR]', err);
+      console.error('[READ RECEIPT ERROR]', err);
     }
-  });
+  };
+
+  socket.on('mark_read', handleRead);
+  socket.on('message_read', handleRead);
 
   // Message Reactions (Real-Time Synchronized across Android and Web)
   const handleReactionEvent = async ({ messageId, recipientId, emoji }) => {
@@ -1267,10 +1314,15 @@ io.on('connection', (socket) => {
       const partnerSockets = onlineUsers.get(pId);
       if (partnerSockets) {
         partnerSockets.forEach(sockId => {
-          io.to(sockId).emit('conversation_read', { readBy: userId });
+          io.to(sockId).emit('conversation_read', { readerId: userId, partnerId: pId, readAt: new Date().toISOString() });
           io.to(sockId).emit('message_read_ack', { all: true, readBy: userId });
+          io.to(sockId).emit('message_read', { all: true, readBy: userId });
+          io.to(sockId).emit('message_status_update', { all: true, status: 'READ', readBy: userId });
         });
       }
+      const convRoom = `chat_${Math.min(userId, pId)}_${Math.max(userId, pId)}`;
+      io.to(convRoom).emit('message_status_update', { all: true, status: 'READ', readBy: userId });
+      io.to(convRoom).emit('message_read', { all: true, readBy: userId });
     } catch (err) {
       console.error('[CONVERSATION READ ERROR]', err);
     }

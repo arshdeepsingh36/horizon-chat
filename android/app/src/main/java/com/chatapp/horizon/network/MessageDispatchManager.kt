@@ -123,7 +123,7 @@ object MessageDispatchManager {
                     }
                 }
 
-                on("message_delivered_ack") { args ->
+                val handleDelivered = { args: Array<Any> ->
                     if (args.isNotEmpty()) {
                         val data = args[0] as? JSONObject
                         val mId = data?.optLong("messageId", -1L) ?: (data?.optLong("id", -1L) ?: -1L)
@@ -132,6 +132,8 @@ object MessageDispatchManager {
                         }
                     }
                 }
+                on("message_delivered_ack", handleDelivered)
+                on("message_delivered", handleDelivered)
 
                 on("message_status_update") { args ->
                     if (args.isNotEmpty()) {
@@ -144,15 +146,17 @@ object MessageDispatchManager {
                     }
                 }
 
-                on("message_read_ack") { args ->
+                val handleRead = { args: Array<Any> ->
                     if (args.isNotEmpty()) {
                         val data = args[0] as? JSONObject
-                        val mId = data?.optLong("messageId", -1L) ?: -1L
+                        val mId = data?.optLong("messageId", -1L) ?: (data?.optLong("id", -1L) ?: -1L)
                         if (mId > 0) {
                             listeners.forEach { it.onMessageStatusUpdated(mId, null, "READ") }
                         }
                     }
                 }
+                on("message_read_ack", handleRead)
+                on("message_read", handleRead)
 
                 on("conversation_read") { args ->
                     if (args.isNotEmpty()) {

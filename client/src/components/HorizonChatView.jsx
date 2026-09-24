@@ -207,24 +207,28 @@ export default function HorizonChatView({
   };
 
   // 1. Initial Load: Strictly 25 messages (TRD Section 3.3 & Rules Section 3)
-  // 1. Initial Load: Strictly 25 messages with explicit deduplication & list replacement
+  // 1. Initial Load: Fetch latest 100 messages and sort chronologically
   useEffect(() => {
     let isMounted = true;
 
     async function loadInitialMessages() {
       setLoadingInitial(true);
       try {
-        const res = await fetch(`${apiBaseUrl}/api/messages/${partner.id}?limit=25`, {
+        const res = await fetch(`${apiBaseUrl}/api/messages/${partner.id}?limit=100`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const data = await res.json();
         if (isMounted && Array.isArray(data)) {
-          const normalized = data.map(normalizeMsg).filter(Boolean);
+          // Ensure chronological ASC order (oldest to newest)
+          const chronological = [...data].sort(
+            (a, b) => new Date(a.createdAt || a.created_at || a.id).getTime() - new Date(b.createdAt || b.created_at || b.id).getTime()
+          );
+          const normalized = chronological.map(normalizeMsg).filter(Boolean);
           // Deduplicate all messages in frontend state by unique message_id
           const uniqueList = deduplicateMessages(normalized);
           // Initial history load strictly replaces rather than blindly appends to the list
           setMessages(uniqueList);
-          setHasMoreOlder(normalized.length >= 25);
+          setHasMoreOlder(normalized.length >= 100);
 
           // Mark incoming unread messages as read
           uniqueList.forEach((msg) => {
@@ -232,6 +236,13 @@ export default function HorizonChatView({
               socket.emit('mark_read', { messageId: msg.id, senderId: msg.senderId });
             }
           });
+
+          // Pin view to bottom on load
+          setTimeout(() => {
+            if (canvasRef.current) {
+              canvasRef.current.scrollTop = canvasRef.current.scrollHeight;
+            }
+          }, 30);
         }
       } catch (err) {
         console.error('[LOAD INITIAL MESSAGES ERROR]', err);
@@ -371,30 +382,34 @@ export default function HorizonChatView({
       );
     };
 
-    const handleReadAck = ({ messageId, all }) => {
-      if (all) {
+    const handleReadAck = (payload) => {
+      if (payload?.all) {
         setMessages((prev) => prev.map((m) => ({ ...m, status: 'READ' })));
-      } else if (messageId) {
-        const targetId = Number(messageId);
+      } else if (payload?.messageId || payload?.id) {
+        const targetId = Number(payload.messageId || payload.id);
         setMessages((prev) =>
           prev.map((m) => (m.id === targetId ? { ...m, status: 'READ' } : m))
         );
       }
     };
 
-    const handleDeliveredAck = ({ messageId, id }) => {
-      const targetId = Number(messageId || id);
+    const handleDeliveredAck = (payload) => {
+      const targetId = Number(payload?.messageId || payload?.id);
       if (!targetId) return;
       setMessages((prev) =>
         prev.map((m) => (m.id === targetId && m.status !== 'READ' ? { ...m, status: 'DELIVERED' } : m))
       );
     };
 
-    const handleStatusUpdate = ({ messageId, id, status }) => {
-      const targetId = Number(messageId || id);
-      if (!targetId || !status) return;
+    const handleStatusUpdate = (payload) => {
+      if (payload?.all && payload?.status) {
+        setMessages((prev) => prev.map((m) => ({ ...m, status: payload.status })));
+        return;
+      }
+      const targetId = Number(payload?.messageId || payload?.id);
+      if (!targetId || !payload?.status) return;
       setMessages((prev) =>
-        prev.map((m) => (m.id === targetId ? { ...m, status } : m))
+        prev.map((m) => (m.id === targetId ? { ...m, status: payload.status } : m))
       );
     };
 
@@ -445,7 +460,10 @@ export default function HorizonChatView({
     socket.on('message_reaction', handleReactionUpdated);
     socket.on('message_reaction_updated', handleReactionUpdated);
     socket.on('message_read_ack', handleReadAck);
+    socket.on('message_read', handleReadAck);
+    socket.on('conversation_read', handleReadAck);
     socket.on('message_delivered_ack', handleDeliveredAck);
+    socket.on('message_delivered', handleDeliveredAck);
     socket.on('message_status_update', handleStatusUpdate);
     socket.on('message_deleted', handleMessageDeleted);
     socket.on('user_status_changed', handleStatusChanged);
@@ -457,7 +475,10 @@ export default function HorizonChatView({
       socket.off('message_reaction', handleReactionUpdated);
       socket.off('message_reaction_updated', handleReactionUpdated);
       socket.off('message_read_ack', handleReadAck);
+      socket.off('message_read', handleReadAck);
+      socket.off('conversation_read', handleReadAck);
       socket.off('message_delivered_ack', handleDeliveredAck);
+      socket.off('message_delivered', handleDeliveredAck);
       socket.off('message_status_update', handleStatusUpdate);
       socket.off('message_deleted', handleMessageDeleted);
       socket.off('user_status_changed', handleStatusChanged);

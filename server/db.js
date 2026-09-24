@@ -565,8 +565,8 @@ function formatMessage(r) {
   };
 }
 
-export async function getMessagesCursor(currentUserId, targetUserId, cursorId = null, limit = 25) {
-  const safeLimit = Math.min(parseInt(limit, 10) || 25, 50);
+export async function getMessagesCursor(currentUserId, targetUserId, cursorId = null, limit = 100) {
+  const safeLimit = Math.min(parseInt(limit, 10) || 100, 100);
 
   if (isPg) {
     let query;
@@ -1173,16 +1173,18 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
     }
     if (sId) {
       params.push(sId);
-      sql += ` AND id > $${params.length}`;
+      sql += ` AND id > $${params.length} ORDER BY id ASC LIMIT 100`;
     } else if (!tId) {
-      sql += ` AND recipient_id = $1 AND (status != 'READ' OR read_at IS NULL)`;
+      sql += ` AND recipient_id = $1 AND (status != 'READ' OR read_at IS NULL) ORDER BY id DESC LIMIT 100`;
+    } else {
+      sql += ` ORDER BY id DESC LIMIT 100`;
     }
-    sql += ` ORDER BY id ASC LIMIT 100`;
 
     const res = await pgPool.query(sql, params);
-    return res.rows
+    const formatted = res.rows
       .map(formatMessage)
       .filter(m => !m.deletedByUsers.includes(uId));
+    return sId ? formatted : formatted.reverse();
   } else {
     let sql = `
       SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
@@ -1199,12 +1201,13 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
     }
     if (sId) {
       params.push(sId);
-      sql += ` AND id > ?`;
+      sql += ` AND id > ? ORDER BY id ASC LIMIT 100`;
     } else if (!tId) {
       params.push(uId);
-      sql += ` AND recipient_id = ? AND (status != 'READ' OR read_at IS NULL)`;
+      sql += ` AND recipient_id = ? AND (status != 'READ' OR read_at IS NULL) ORDER BY id DESC LIMIT 100`;
+    } else {
+      sql += ` ORDER BY id DESC LIMIT 100`;
     }
-    sql += ` ORDER BY id ASC LIMIT 100`;
 
     return new Promise((resolve, reject) => {
       sqliteDb.all(sql, params, (err, rows) => {
@@ -1212,10 +1215,42 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
         const mapped = (rows || [])
           .map(formatMessage)
           .filter(m => !m.deletedByUsers.includes(uId));
-        resolve(mapped);
+        resolve(sId ? mapped : mapped.reverse());
       });
     });
   }
 }
+
+// Mark pending SENT messages as DELIVERED when recipient connects/joins
+export async function markPendingMessagesDelivered(recipientId) {
+  const rId = Number(recipientId);
+  if (isPg) {
+    const res = await pgPool.query(
+      "UPDATE messages SET status = 'DELIVERED' WHERE recipient_id = $1 AND status = 'SENT' RETURNING *",
+      [rId]
+    );
+    return res.rows.map(formatMessage);
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.all(
+        "SELECT * FROM messages WHERE recipient_id = ? AND status = 'SENT'",
+        [rId],
+        (err, rows) => {
+          if (err) return reject(err);
+          if (!rows || rows.length === 0) return resolve([]);
+          sqliteDb.run(
+            "UPDATE messages SET status = 'DELIVERED' WHERE recipient_id = ? AND status = 'SENT'",
+            [rId],
+            (updateErr) => {
+              if (updateErr) return reject(updateErr);
+              resolve(rows.map(formatMessage).map(m => ({ ...m, status: 'DELIVERED' })));
+            }
+          );
+        }
+      );
+    });
+  }
+}
+
 
 
