@@ -599,6 +599,58 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
     console.error('[DELETE MESSAGE REST ERROR]', err);
     return res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete message' });
   }
+// 3j2. Toggle Message Reaction
+app.post('/api/messages/:id/react', authenticateToken, async (req, res) => {
+  try {
+    const messageId = parseInt(req.params.id, 10);
+    const { emoji, recipientId, partnerUsername } = req.body || {};
+    if (isNaN(messageId) || !emoji) {
+      return res.status(400).json({ error: 'messageId and emoji are required' });
+    }
+
+    const updated = await toggleMessageReaction(messageId, req.user.id, emoji);
+    if (!updated) return res.status(404).json({ error: 'Message not found' });
+
+    const sId = Number(updated.senderId);
+    const uRecipientId = Number(updated.recipientId);
+    let partnerId = sId === req.user.id ? (recipientId ? Number(recipientId) : uRecipientId) : sId;
+    if (!partnerId && partnerUsername) {
+      const u = await getUserByUsername(partnerUsername);
+      if (u) partnerId = Number(u.id);
+    }
+
+    const payload = {
+      messageId,
+      id: messageId,
+      reactions: updated.reactions || {},
+      userId: req.user.id,
+      emoji,
+      message: updated
+    };
+
+    const broadcast = (sockId) => {
+      io.to(sockId).emit('message_reacted', payload);
+      io.to(sockId).emit('message_reaction', payload);
+      io.to(sockId).emit('message_reaction_updated', payload);
+    };
+
+    if (partnerId) {
+      const rSockets = onlineUsers.get(partnerId);
+      if (rSockets) rSockets.forEach(broadcast);
+      const convRoom = `chat_${Math.min(req.user.id, partnerId)}_${Math.max(req.user.id, partnerId)}`;
+      io.to(convRoom).emit('message_reacted', payload);
+      io.to(convRoom).emit('message_reaction', payload);
+      io.to(convRoom).emit('message_reaction_updated', payload);
+    }
+
+    const sSockets = onlineUsers.get(req.user.id);
+    if (sSockets) sSockets.forEach(broadcast);
+
+    return res.json({ success: true, reactions: updated.reactions, message: updated });
+  } catch (err) {
+    console.error('[REACT MESSAGE REST ERROR]', err);
+    return res.status(500).json({ error: 'Failed to react to message' });
+  }
 });
 
 // 3k. Unread & Silent Foreground Message Sync
@@ -1183,14 +1235,22 @@ io.on('connection', (socket) => {
   socket.on('message_read', handleRead);
 
   // Message Reactions (Real-Time Synchronized across Android and Web)
-  const handleReactionEvent = async ({ messageId, recipientId, emoji }) => {
-    if (!messageId || !emoji) return;
+  const handleReactionEvent = async (data, callback) => {
+    const { messageId, recipientId, emoji, partnerUsername } = data || {};
+    if (!messageId || !emoji) {
+      if (typeof callback === 'function') callback({ success: false, error: 'messageId and emoji are required' });
+      return;
+    }
     try {
       const updated = await toggleMessageReaction(Number(messageId), userId, emoji);
       if (updated) {
         const sId = Number(updated.senderId);
         const uRecipientId = Number(updated.recipientId);
-        const partnerId = sId === userId ? (recipientId ? Number(recipientId) : uRecipientId) : sId;
+        let partnerId = sId === userId ? (recipientId ? Number(recipientId) : uRecipientId) : sId;
+        if (!partnerId && partnerUsername) {
+          const u = await getUserByUsername(partnerUsername);
+          if (u) partnerId = Number(u.id);
+        }
         const payload = {
           messageId: Number(messageId),
           id: Number(messageId),
@@ -1206,21 +1266,28 @@ io.on('connection', (socket) => {
           io.to(sockId).emit('message_reaction_updated', payload);
         };
 
-        const rSockets = onlineUsers.get(partnerId);
-        if (rSockets) {
-          rSockets.forEach(broadcast);
+        if (partnerId) {
+          const rSockets = onlineUsers.get(partnerId);
+          if (rSockets) {
+            rSockets.forEach(broadcast);
+          }
+          const convRoom = `chat_${Math.min(userId, partnerId)}_${Math.max(userId, partnerId)}`;
+          io.to(convRoom).emit('message_reacted', payload);
+          io.to(convRoom).emit('message_reaction', payload);
+          io.to(convRoom).emit('message_reaction_updated', payload);
         }
         const sSockets = onlineUsers.get(userId);
         if (sSockets) {
           sSockets.forEach(broadcast);
         }
-        const convRoom = `chat_${Math.min(userId, partnerId)}_${Math.max(userId, partnerId)}`;
-        io.to(convRoom).emit('message_reacted', payload);
-        io.to(convRoom).emit('message_reaction', payload);
-        io.to(convRoom).emit('message_reaction_updated', payload);
+
+        if (typeof callback === 'function') {
+          callback({ success: true, reactions: updated.reactions, message: updated });
+        }
       }
     } catch (err) {
       console.error('[REACTION ERROR]', err);
+      if (typeof callback === 'function') callback({ success: false, error: err.message });
     }
   };
 

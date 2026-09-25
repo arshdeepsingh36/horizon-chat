@@ -21,6 +21,7 @@ import {
   Trash2,
   Radio,
   Sparkles,
+  Smile,
   Camera,
   FolderOpen
 } from 'lucide-react';
@@ -284,15 +285,76 @@ export default function HorizonChatView({
     }
   };
 
-  // Toggle emoji reaction
+  // Toggle emoji reaction with optimistic UI update and REST fallback
   const handleToggleReaction = (msgId, emoji) => {
     setActiveReactionMenuId(null);
-    if (!socket || !msgId || !emoji) return;
-    socket.emit('message_reaction', {
-      messageId: Number(msgId),
-      recipientId: Number(partner.id),
-      emoji
-    });
+    if (!msgId || !emoji) return;
+
+    const uId = Number(user.id);
+    const targetId = Number(msgId);
+
+    // 1. Instant Optimistic UI Update
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (Number(m.id) === targetId) {
+          let curReactions = typeof m.reactions === 'string'
+            ? JSON.parse(m.reactions || '{}')
+            : (m.reactions ? { ...m.reactions } : {});
+
+          // Clean & ensure array copies
+          const nextReactions = {};
+          for (const [k, v] of Object.entries(curReactions)) {
+            if (Array.isArray(v)) {
+              const filtered = v.map(Number).filter(id => id !== uId);
+              if (filtered.length > 0) {
+                nextReactions[k] = filtered;
+              }
+            }
+          }
+
+          // If user didn't already have this emoji, add it
+          const hadThisEmoji = Array.isArray(curReactions[emoji]) && curReactions[emoji].some(id => Number(id) === uId);
+          if (!hadThisEmoji) {
+            if (!nextReactions[emoji]) nextReactions[emoji] = [];
+            nextReactions[emoji].push(uId);
+          }
+
+          return { ...m, reactions: nextReactions };
+        }
+        return m;
+      })
+    );
+
+    // 2. Real-Time Socket Broadcast
+    if (socket && socket.connected) {
+      socket.emit('message_reaction', {
+        messageId: targetId,
+        recipientId: Number(partner.id),
+        emoji
+      });
+    }
+
+    // 3. HTTP Fallback Endpoint for Guaranteed Persistence
+    fetch(`${apiBaseUrl}/api/messages/${targetId}/react`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        emoji,
+        recipientId: Number(partner.id)
+      })
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.reactions) {
+          setMessages((prev) =>
+            prev.map((m) => (Number(m.id) === targetId ? { ...m, reactions: data.reactions } : m))
+          );
+        }
+      })
+      .catch((err) => console.warn('[REACTION HTTP SYNC ERROR]', err));
   };
 
   // Room Subscription & Re-emit on Reconnection for Reliability
@@ -374,11 +436,21 @@ export default function HorizonChatView({
     };
 
     const handleReactionUpdated = (payload) => {
-      const mId = Number(payload.messageId || payload.id);
-      const reactions = payload.reactions || {};
+      const mId = Number(payload?.messageId || payload?.id);
+      let reactions = payload?.reactions || {};
+      if (typeof reactions === 'string') {
+        try {
+          reactions = JSON.parse(reactions);
+        } catch {
+          reactions = {};
+        }
+      }
+      if (!reactions || typeof reactions !== 'object' || Array.isArray(reactions)) {
+        reactions = {};
+      }
       if (!mId) return;
       setMessages((prev) =>
-        prev.map((m) => (m.id === mId ? { ...m, reactions } : m))
+        prev.map((m) => (Number(m.id) === mId ? { ...m, reactions } : m))
       );
     };
 
@@ -1002,6 +1074,12 @@ export default function HorizonChatView({
                 <div
                   id={`msg-${msg.id}`}
                   className={`horizon-bubble ${isMe ? 'outgoing' : 'incoming'} ${highlightedMsgId === Number(msg.id) ? 'highlighted' : ''}`}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    if (!msg.deletedForEveryone) {
+                      setActiveReactionMenuId(activeReactionMenuId === msg.id ? null : msg.id);
+                    }
+                  }}
                 >
                   {/* Floating Reaction Picker */}
                   {activeReactionMenuId === msg.id && (
@@ -1009,17 +1087,20 @@ export default function HorizonChatView({
                       className={`horizon-reaction-bar ${isMe ? 'outgoing' : 'incoming'}`}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {REACTION_EMOJIS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          className="horizon-reaction-btn"
-                          onClick={() => handleToggleReaction(msg.id, emoji)}
-                          title={`React ${emoji}`}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
+                      {REACTION_EMOJIS.map((emoji) => {
+                        const isReactedByMe = Array.isArray(msg.reactions?.[emoji]) && msg.reactions[emoji].some(id => Number(id) === Number(user.id));
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            className={`horizon-reaction-btn ${isReactedByMe ? 'active' : ''}`}
+                            onClick={() => handleToggleReaction(msg.id, emoji)}
+                            title={isReactedByMe ? `Remove ${emoji}` : `React ${emoji}`}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -1279,6 +1360,32 @@ export default function HorizonChatView({
                       </span>
                     )}
 
+                    {/* Direct Quick Reaction Trigger */}
+                    {!msg.deletedForEveryone && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveReactionMenuId(activeReactionMenuId === msg.id ? null : msg.id);
+                          setActiveMessageMenuId(null);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: '2px',
+                          color: activeReactionMenuId === msg.id ? 'var(--color-accent-amber)' : 'var(--color-text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          opacity: 0.8,
+                          marginLeft: '4px'
+                        }}
+                        title="React"
+                      >
+                        <Smile size={12} />
+                      </button>
+                    )}
+
                     {/* Context Action Menu Trigger */}
                     {!msg.deletedForEveryone && (
                       <button
@@ -1296,7 +1403,7 @@ export default function HorizonChatView({
                           display: 'flex',
                           alignItems: 'center',
                           opacity: 0.7,
-                          marginLeft: '4px'
+                          marginLeft: '2px'
                         }}
                         title="Message Options"
                       >
@@ -1313,13 +1420,25 @@ export default function HorizonChatView({
                         e.stopPropagation();
                         setActiveReactionMenuId(activeReactionMenuId === msg.id ? null : msg.id);
                       }}
-                      title="Reactions"
+                      title="Click to react"
                     >
-                      {Object.entries(msg.reactions).map(([emoji, users]) => (
-                        <span key={emoji} style={{ marginRight: '2px' }}>
-                          {emoji} {Array.isArray(users) && users.length > 1 ? users.length : ''}
-                        </span>
-                      ))}
+                      {Object.entries(msg.reactions || {}).map(([emoji, users]) => {
+                        if (!Array.isArray(users) || users.length === 0) return null;
+                        const isMine = users.some(id => Number(id) === Number(user.id));
+                        return (
+                          <span
+                            key={emoji}
+                            className={`horizon-reaction-chip ${isMine ? 'mine' : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleReaction(msg.id, emoji);
+                            }}
+                            title={isMine ? `Remove ${emoji}` : `Add ${emoji}`}
+                          >
+                            {emoji} {users.length > 1 ? users.length : ''}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -1395,7 +1514,7 @@ export default function HorizonChatView({
                         onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
                         onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                       >
-                        <Sparkles size={13} color="var(--color-accent-amber)" />
+                        <Smile size={13} color="var(--color-accent-amber)" />
                         <span>Add Reaction</span>
                       </button>
 

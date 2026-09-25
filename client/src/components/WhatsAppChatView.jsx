@@ -124,10 +124,17 @@ export default function WhatsAppChatView({
     };
 
     // Reaction updated
-    const handleReactionUpdated = ({ messageId, reactions }) => {
+    const handleReactionUpdated = (payload) => {
+      const mId = Number(payload?.messageId || payload?.id);
+      let reactions = payload?.reactions || {};
+      if (typeof reactions === 'string') {
+        try { reactions = JSON.parse(reactions); } catch { reactions = {}; }
+      }
+      if (!reactions || typeof reactions !== 'object' || Array.isArray(reactions)) reactions = {};
+      if (!mId) return;
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === messageId ? { ...m, reactions } : m
+          Number(m.id) === mId ? { ...m, reactions } : m
         )
       );
     };
@@ -225,15 +232,49 @@ export default function WhatsAppChatView({
     socket.emit('typing', { to: partnerUsername, isTyping: false });
   };
 
-  // Handle reaction on a message
+  // Handle reaction on a message with optimistic update
   const handleToggleReaction = (msgId, emoji) => {
-    if (!socket) return;
-    socket.emit('add_reaction', {
-      messageId: msgId,
-      emoji,
-      partnerUsername
-    });
     setSelectedMessageForReaction(null);
+    if (!msgId || !emoji) return;
+
+    const uId = Number(user.id);
+    const targetId = Number(msgId);
+
+    // Optimistic UI update
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (Number(m.id) === targetId) {
+          let curReactions = typeof m.reactions === 'string'
+            ? JSON.parse(m.reactions || '{}')
+            : (m.reactions ? { ...m.reactions } : {});
+
+          const nextReactions = {};
+          for (const [k, v] of Object.entries(curReactions)) {
+            if (Array.isArray(v)) {
+              const filtered = v.map(Number).filter(id => id !== uId);
+              if (filtered.length > 0) nextReactions[k] = filtered;
+            }
+          }
+
+          const hadThisEmoji = Array.isArray(curReactions[emoji]) && curReactions[emoji].some(id => Number(id) === uId);
+          if (!hadThisEmoji) {
+            if (!nextReactions[emoji]) nextReactions[emoji] = [];
+            nextReactions[emoji].push(uId);
+          }
+
+          return { ...m, reactions: nextReactions };
+        }
+        return m;
+      })
+    );
+
+    if (socket) {
+      socket.emit('add_reaction', {
+        messageId: targetId,
+        emoji,
+        partnerUsername
+      });
+    }
   };
 
   // Format time

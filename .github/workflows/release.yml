@@ -36,7 +36,7 @@ jobs:
             - **Deleted Message Text**: Formatted "This message was deleted" in italics.
           files: |
             apk/app-release.apk
-            apk/horizon-chat-v3.2.1.apk
+            apk/horizon-chat-v3.2.2.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -502,6 +502,9 @@ function formatMessage(r) {
   try {
     const rRaw = r.reactions;
     reactions = typeof rRaw === 'string' ? JSON.parse(rRaw || '{}') : (rRaw || {});
+    if (!reactions || typeof reactions !== 'object' || Array.isArray(reactions)) {
+      reactions = {};
+    }
   } catch (e) {
     reactions = {};
   }
@@ -846,11 +849,21 @@ export async function toggleMessageReaction(messageId, userId, emoji) {
   try {
     const rRaw = messageRow.reactions;
     reactions = typeof rRaw === 'string' ? JSON.parse(rRaw || '{}') : (rRaw || {});
+    if (!reactions || typeof reactions !== 'object' || Array.isArray(reactions)) {
+      reactions = {};
+    }
   } catch (e) {
     reactions = {};
   }
 
   const uId = Number(userId);
+
+  // Clean invalid entries
+  for (const [key, val] of Object.entries(reactions)) {
+    if (!Array.isArray(val)) {
+      delete reactions[key];
+    }
+  }
 
   // If user already reacted with this emoji, toggle it off
   if (reactions[emoji] && Array.isArray(reactions[emoji]) && reactions[emoji].includes(uId)) {
