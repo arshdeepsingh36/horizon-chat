@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_base">
+
+    <!-- Top App Bar -->
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbarAdmin"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/surface_elevated"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageView
+            android:id="@+id/btnAdminBack"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="6dp"
+            android:src="@drawable/ic_arrow_back"
+            app:tint="@color/text_primary"
+            android:contentDescription="Back" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Admin Dashboard"
+            android:textColor="@color/text_primary"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginStart="16dp" />
+
+        <ImageView
+            android:id="@+id/btnAdminRefresh"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="6dp"
+            android:layout_gravity="end"
+            android:layout_marginEnd="16dp"
+            android:src="@drawable/ic_sparkles"
+            app:tint="@color/accent_amber"
+            android:contentDescription="Refresh" />
+
+    </androidx.appcompat.widget.Toolbar>
+
+    <!-- Scrollable Content -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        app:layout_constraintTop_toBottomOf="@id/toolbarAdmin"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Stats Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:weightSum="3"
+                android:layout_marginBottom="16dp">
+
+                <!-- Total Users Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="6dp"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="12dp"
+                    app:strokeColor="#33F59E0B"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center">
+
+                        <TextView
+                            android:id="@+id/tvStatTotalUsers"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0"
+                            android:textColor="@color/accent_amber"
+                            android:textSize="20sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Users"
+                            android:textColor="@color/text_muted"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Active Sockets Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="3dp"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="12dp"
+                    app:strokeColor="#3310B981"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center">
+
+                        <TextView
+                            android:id="@+id/tvStatActiveSockets"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0"
+                            android:textColor="#10B981"
+                            android:textSize="20sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Sockets"
+                            android:textColor="@color/text_muted"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Total Messages Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    app:cardBackgroundColor="@color/surface"
+                    app:cardCornerRadius="12dp"
+                    app:strokeColor="#3338BDF8"
+                    app:strokeWidth="1dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center">
+
+                        <TextView
+                            android:id="@+id/tvStatTotalMessages"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0"
+                            android:textColor="#38BDF8"
+                            android:textSize="20sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Messages"
+                            android:textColor="@color/text_muted"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+            </LinearLayout>
+
+            <!-- 24h Purge Trigger Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/surface"
+                app:cardCornerRadius="12dp"
+                app:strokeColor="#40EF4444"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="24h Ephemeral Purge"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Permanently purge seen messages (>24h) and Cloudflare R2 attachments."
+                        android:textColor="@color/text_muted"
+                        android:textSize="12sp"
+                        android:layout_marginTop="2dp"
+                        android:layout_marginBottom="10dp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnManualPurge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:text="Trigger Manual Purge"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp"
+                        app:backgroundTint="#EF4444"
+                        app:cornerRadius="8dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- User Management Header & Search -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="User Management"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <EditText
+                android:id="@+id/etSearchAdminUsers"
+                android:layout_width="match_parent"
+                android:layout_height="46dp"
+                android:background="@drawable/bg_search_input"
+                android:hint="Search users..."
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/text_muted"
+                android:paddingHorizontal="14dp"
+                android:textSize="13sp"
+                android:layout_marginBottom="12dp" />
+
+            <!-- User Recycler View -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvAdminUsers"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false" />
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- Loading Overlay -->
+    <ProgressBar
+        android:id="@+id/pbAdminLoading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

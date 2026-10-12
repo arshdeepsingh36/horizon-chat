@@ -22,18 +22,6 @@
         android:layout_marginBottom="16dp">
 
         <TextView
-            android:id="@+id/btnReactionHeart"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="❤️"
-            android:textSize="22sp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:clickable="true"
-            android:focusable="true" />
-
-        <TextView
             android:id="@+id/btnReactionThumbsUp"
             android:layout_width="0dp"
             android:layout_height="44dp"
@@ -46,48 +34,12 @@
             android:focusable="true" />
 
         <TextView
-            android:id="@+id/btnReactionThumbsDown"
+            android:id="@+id/btnReactionHeart"
             android:layout_width="0dp"
             android:layout_height="44dp"
             android:layout_weight="1"
             android:gravity="center"
-            android:text="👎"
-            android:textSize="22sp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:clickable="true"
-            android:focusable="true" />
-
-        <TextView
-            android:id="@+id/btnReactionFire"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="🔥"
-            android:textSize="22sp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:clickable="true"
-            android:focusable="true" />
-
-        <TextView
-            android:id="@+id/btnReactionInLove"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="🥰"
-            android:textSize="22sp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:clickable="true"
-            android:focusable="true" />
-
-        <TextView
-            android:id="@+id/btnReactionClap"
-            android:layout_width="0dp"
-            android:layout_height="44dp"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="👏"
+            android:text="❤️"
             android:textSize="22sp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
@@ -100,6 +52,42 @@
             android:layout_weight="1"
             android:gravity="center"
             android:text="😂"
+            android:textSize="22sp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/btnReactionSurprised"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="😮"
+            android:textSize="22sp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/btnReactionCry"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="😢"
+            android:textSize="22sp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/btnReactionPray"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="🙏"
             android:textSize="22sp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"

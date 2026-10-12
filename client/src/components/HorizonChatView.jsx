@@ -23,11 +23,14 @@ import {
   Sparkles,
   Smile,
   Camera,
-  FolderOpen
+  FolderOpen,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import { uploadToR2, sanitizeMediaUrl } from '../utils/r2Upload';
 
-const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥'];
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 // Helper to normalize message objects across snake_case and camelCase
 function normalizeMsg(m) {
@@ -120,6 +123,10 @@ export default function HorizonChatView({
   const [playingVoiceId, setPlayingVoiceId] = useState(null);
   const [voiceProgress, setVoiceProgress] = useState(0);
   const [lightboxMedia, setLightboxMedia] = useState(null); // { type: 'IMAGE'|'VIDEO', url, title, sender, timestamp, caption }
+  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomPan, setZoomPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState('media'); // 'media' | 'docs' | 'links'
   const [failedImages, setFailedImages] = useState({});
@@ -487,6 +494,11 @@ export default function HorizonChatView({
 
     const handleMessageDeleted = (payload) => {
       const mId = Number(payload.messageId || payload.id);
+      if (payload?.expired) {
+        setMessages((prev) => prev.filter((m) => m.id !== mId));
+        return;
+      }
+
       const deletedForEveryone = Boolean(payload.deletedForEveryone);
       const deletedByUsers = payload.deletedByUsers || [];
 
@@ -533,11 +545,14 @@ export default function HorizonChatView({
     socket.on('message_reaction_updated', handleReactionUpdated);
     socket.on('message_read_ack', handleReadAck);
     socket.on('message_read', handleReadAck);
+    socket.on('message_seen_ack', handleReadAck);
+    socket.on('message_seen', handleReadAck);
     socket.on('conversation_read', handleReadAck);
     socket.on('message_delivered_ack', handleDeliveredAck);
     socket.on('message_delivered', handleDeliveredAck);
     socket.on('message_status_update', handleStatusUpdate);
     socket.on('message_deleted', handleMessageDeleted);
+    socket.on('message_expired', handleMessageDeleted);
     socket.on('user_status_changed', handleStatusChanged);
     socket.on('media_viewed', handleMediaViewed);
 
@@ -548,11 +563,14 @@ export default function HorizonChatView({
       socket.off('message_reaction_updated', handleReactionUpdated);
       socket.off('message_read_ack', handleReadAck);
       socket.off('message_read', handleReadAck);
+      socket.off('message_seen_ack', handleReadAck);
+      socket.off('message_seen', handleReadAck);
       socket.off('conversation_read', handleReadAck);
       socket.off('message_delivered_ack', handleDeliveredAck);
       socket.off('message_delivered', handleDeliveredAck);
       socket.off('message_status_update', handleStatusUpdate);
       socket.off('message_deleted', handleMessageDeleted);
+      socket.off('message_expired', handleMessageDeleted);
       socket.off('user_status_changed', handleStatusChanged);
       socket.off('media_viewed', handleMediaViewed);
     };
@@ -569,18 +587,17 @@ export default function HorizonChatView({
           .map((m) => Number(m.id))
           .filter((id) => !isNaN(id) && id > 0 && id < 1000000000000);
         const latestId = numericIds.length > 0 ? Math.max(...numericIds) : null;
-        const url = latestId
-          ? `${apiBaseUrl}/api/messages/sync?targetUserId=${partner.id}&sinceId=${latestId}`
-          : `${apiBaseUrl}/api/messages/${partner.id}?limit=25`;
+        if (!latestId) return; // Prevent initial history re-fetch and duplication
+        const url = `${apiBaseUrl}/api/messages/sync?targetUserId=${partner.id}&sinceId=${latestId}`;
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
           const normalized = data.map(normalizeMsg).filter(Boolean);
           setMessages((prev) => {
-            const existingIds = new Set(prev.map((m) => m.id));
-            const newItems = normalized.filter((m) => !existingIds.has(m.id));
-            if (newItems.length === 0) return prev;
-            return [...prev, ...newItems];
+            const merged = deduplicateMessages([...prev, ...normalized]);
+            return merged.sort(
+              (a, b) => (Number(a.id) || 0) - (Number(b.id) || 0) || new Date(a.createdAt || a.id).getTime() - new Date(b.createdAt || b.id).getTime()
+            );
           });
         }
       } catch (e) {
@@ -1265,7 +1282,7 @@ export default function HorizonChatView({
                         <video
                           src={sanitizeMediaUrl(msg.attachmentUrl).startsWith('http') ? sanitizeMediaUrl(msg.attachmentUrl) : `${apiBaseUrl.replace(/\/$/, '')}/${sanitizeMediaUrl(msg.attachmentUrl).replace(/^\//, '')}`}
                           controls
-                          preload="metadata"
+                          preload="auto"
                           playsInline
                           style={{ width: '100%', maxHeight: '240px', borderRadius: '12px', display: 'block', backgroundColor: '#000' }}
                           poster={msg.thumbnailBlur || undefined}
@@ -1891,8 +1908,48 @@ export default function HorizonChatView({
                 <span>Save</span>
               </button>
 
+              {lightboxMedia.type !== 'VIDEO' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '6px', background: 'rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: '20px' }}>
+                  <button
+                    onClick={() => setZoomScale((s) => Math.max(1, +(s - 0.5).toFixed(2)))}
+                    disabled={zoomScale <= 1}
+                    style={{ background: 'none', border: 'none', color: zoomScale <= 1 ? '#64748B' : '#fff', cursor: zoomScale <= 1 ? 'default' : 'pointer', padding: '2px', display: 'flex' }}
+                    title="Zoom Out"
+                  >
+                    <ZoomOut size={16} />
+                  </button>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#F8FAFC', minWidth: '38px', textAlign: 'center' }}>
+                    {Math.round(zoomScale * 100)}%
+                  </span>
+                  <button
+                    onClick={() => setZoomScale((s) => Math.min(5, +(s + 0.5).toFixed(2)))}
+                    disabled={zoomScale >= 5}
+                    style={{ background: 'none', border: 'none', color: zoomScale >= 5 ? '#64748B' : '#fff', cursor: zoomScale >= 5 ? 'default' : 'pointer', padding: '2px', display: 'flex' }}
+                    title="Zoom In"
+                  >
+                    <ZoomIn size={16} />
+                  </button>
+                  {zoomScale !== 1 && (
+                    <button
+                      onClick={() => {
+                        setZoomScale(1);
+                        setZoomPan({ x: 0, y: 0 });
+                      }}
+                      style={{ background: 'none', border: 'none', color: '#F59E0B', cursor: 'pointer', padding: '2px', display: 'flex', marginLeft: '4px' }}
+                      title="Reset Zoom"
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  )}
+                </div>
+              )}
+
               <button
-                onClick={() => setLightboxMedia(null)}
+                onClick={() => {
+                  setLightboxMedia(null);
+                  setZoomScale(1);
+                  setZoomPan({ x: 0, y: 0 });
+                }}
                 style={{
                   background: 'rgba(255, 255, 255, 0.15)',
                   border: 'none',
@@ -1912,7 +1969,7 @@ export default function HorizonChatView({
             </div>
           </div>
 
-          {/* Media Canvas with Aspect-Ratio Fitting */}
+          {/* Media Canvas with Interactive Zoom & Pan */}
           <div
             style={{
               flex: 1,
@@ -1920,15 +1977,51 @@ export default function HorizonChatView({
               alignItems: 'center',
               justifyContent: 'center',
               overflow: 'hidden',
-              padding: '12px'
+              padding: '12px',
+              cursor: lightboxMedia.type !== 'VIDEO' && zoomScale > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default'
             }}
+            onWheel={(e) => {
+              if (lightboxMedia.type !== 'VIDEO') {
+                e.preventDefault();
+                const delta = e.deltaY < 0 ? 0.25 : -0.25;
+                setZoomScale((s) => Math.min(5, Math.max(1, +(s + delta).toFixed(2))));
+                if (zoomScale <= 1.25 && delta < 0) {
+                  setZoomPan({ x: 0, y: 0 });
+                }
+              }
+            }}
+            onMouseDown={(e) => {
+              if (lightboxMedia.type !== 'VIDEO' && zoomScale > 1) {
+                setIsPanning(true);
+                setPanStart({ x: e.clientX - zoomPan.x, y: e.clientY - zoomPan.y });
+              }
+            }}
+            onMouseMove={(e) => {
+              if (isPanning && zoomScale > 1) {
+                setZoomPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+              }
+            }}
+            onMouseUp={() => setIsPanning(false)}
+            onMouseLeave={() => setIsPanning(false)}
+            onTouchStart={(e) => {
+              if (lightboxMedia.type !== 'VIDEO' && e.touches.length === 1 && zoomScale > 1) {
+                setIsPanning(true);
+                setPanStart({ x: e.touches[0].clientX - zoomPan.x, y: e.touches[0].clientY - zoomPan.y });
+              }
+            }}
+            onTouchMove={(e) => {
+              if (isPanning && zoomScale > 1 && e.touches.length === 1) {
+                setZoomPan({ x: e.touches[0].clientX - panStart.x, y: e.touches[0].clientY - panStart.y });
+              }
+            }}
+            onTouchEnd={() => setIsPanning(false)}
           >
             {lightboxMedia.type === 'VIDEO' ? (
               <video
                 src={lightboxMedia.url}
                 controls
                 autoPlay
-                preload="metadata"
+                preload="auto"
                 playsInline
                 style={{
                   maxWidth: '100%',
@@ -1951,7 +2044,19 @@ export default function HorizonChatView({
                   maxWidth: '100%',
                   maxHeight: '100%',
                   objectFit: 'contain',
-                  borderRadius: '8px'
+                  borderRadius: '8px',
+                  transform: `translate(${zoomPan.x}px, ${zoomPan.y}px) scale(${zoomScale})`,
+                  transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+                  userSelect: 'none',
+                  pointerEvents: 'auto'
+                }}
+                onDoubleClick={() => {
+                  if (zoomScale > 1) {
+                    setZoomScale(1);
+                    setZoomPan({ x: 0, y: 0 });
+                  } else {
+                    setZoomScale(2);
+                  }
                 }}
               />
             )}

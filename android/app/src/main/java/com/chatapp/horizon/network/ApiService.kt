@@ -17,6 +17,38 @@ interface ApiService {
     @POST("api/auth/login")
     suspend fun login(@Body request: AuthRequest): Response<AuthResponse>
 
+    @POST("api/auth/forgot-password")
+    suspend fun forgotPassword(@Body request: ForgotPasswordRequest): Response<ForgotPasswordResponse>
+
+    @POST("api/auth/reset-password")
+    suspend fun resetPassword(@Body request: ResetPasswordRequest): Response<GenericResponse>
+
+    @GET("api/admin/stats")
+    suspend fun getAdminStats(@Header("Authorization") token: String): Response<AdminStatsResponse>
+
+    @GET("api/admin/users")
+    suspend fun getAdminUsers(@Header("Authorization") token: String): Response<List<AdminUser>>
+
+    @PATCH("api/admin/users/{userId}/status")
+    suspend fun updateAdminUserStatus(
+        @Header("Authorization") token: String,
+        @Path("userId") userId: Int,
+        @Body request: UpdateUserStatusRequest
+    ): Response<GenericResponse>
+
+    @POST("api/admin/users/{userId}/reset-password")
+    suspend fun adminResetUserPassword(
+        @Header("Authorization") token: String,
+        @Path("userId") userId: Int,
+        @Body request: AdminResetPasswordRequest
+    ): Response<GenericResponse>
+
+    @POST("api/admin/purge-messages")
+    suspend fun adminPurgeMessages(
+        @Header("Authorization") token: String,
+        @Body request: AdminPurgeRequest
+    ): Response<GenericResponse>
+
     @GET("api/users/lookup")
     suspend fun lookupUser(
         @Header("Authorization") token: String,

@@ -34,29 +34,10 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageEven
     private val cachedConversations = mutableListOf<Conversation>()
     private var searchJob: Job? = null
 
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            HorizonNotificationManager.init(this)
-        }
-    }
-
-    private fun checkNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityChatListBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        HorizonNotificationManager.init(this)
-        checkNotificationPermission()
 
         val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
         authToken = intent.getStringExtra("AUTH_TOKEN") ?: prefs.getString("horizon_token", null) ?: prefs.getString("token", "") ?: ""
@@ -98,6 +79,21 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageEven
 
         binding.rvConversationList.layoutManager = LinearLayoutManager(this)
         binding.rvConversationList.adapter = adapter
+
+        val prefs = getSharedPreferences("horizon_prefs", Context.MODE_PRIVATE)
+        val isAdmin = intent.getBooleanExtra("IS_ADMIN", false) || prefs.getBoolean("is_admin", false)
+        if (isAdmin) {
+            binding.btnAdminDashboard.visibility = View.VISIBLE
+            binding.btnAdminDashboard.setOnClickListener {
+                val adminIntent = Intent(this, AdminDashboardActivity::class.java).apply {
+                    putExtra("AUTH_TOKEN", authToken)
+                    putExtra("CURRENT_USER_ID", currentUserId)
+                }
+                startActivity(adminIntent)
+            }
+        } else {
+            binding.btnAdminDashboard.visibility = View.GONE
+        }
 
         binding.btnSettings.setOnClickListener {
             startActivity(Intent(this, ProfileActivity::class.java))
@@ -206,21 +202,6 @@ class ChatListActivity : AppCompatActivity(), MessageDispatchManager.MessageEven
     override fun onNewMessage(message: ChatMessage) {
         runOnUiThread {
             loadChats()
-            // Trigger push notification if outside this conversation (Task 7)
-            if (message.senderId != currentUserId) {
-                val partner = cachedConversations.find { it.partnerId == message.senderId }
-                val senderName = partner?.partnerDisplayName ?: partner?.partnerUsername ?: "User @${message.senderId}"
-                val senderUsername = partner?.partnerUsername ?: "user_${message.senderId}"
-
-                HorizonNotificationManager.showIncomingMessageNotification(
-                    this,
-                    message,
-                    senderUsername,
-                    senderName,
-                    currentUserId,
-                    authToken
-                )
-            }
         }
     }
 

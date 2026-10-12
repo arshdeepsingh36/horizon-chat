@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    app:cardBackgroundColor="@color/surface"
+    app:cardCornerRadius="10dp"
+    app:strokeColor="#20FFFFFF"
+    app:strokeWidth="1dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Avatar Initials -->
+            <TextView
+                android:id="@+id/tvAdminUserAvatar"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/bg_avatar_circle"
+                android:gravity="center"
+                android:text="U"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <!-- User Info -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="10dp">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tvAdminUsername"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@username"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvAdminBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="ADMIN"
+                        android:textColor="@color/accent_amber"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:background="#26F59E0B"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="1dp"
+                        android:layout_marginStart="6dp"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tvAdminStatusBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="ACTIVE"
+                        android:textColor="#10B981"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:background="#2610B981"
+                        android:paddingHorizontal="4dp"
+                        android:paddingVertical="1dp"
+                        android:layout_marginStart="6dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvAdminUserSubtext"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Messages: 0 • Offline"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Actions Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end"
+            android:layout_marginTop="10dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAdminResetPassword"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Reset Password"
+                android:textColor="@color/accent_amber"
+                android:textSize="11sp"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                app:strokeColor="@color/accent_amber"
+                app:cornerRadius="6dp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAdminToggleStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="Deactivate"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                app:backgroundTint="#EF4444"
+                app:cornerRadius="6dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

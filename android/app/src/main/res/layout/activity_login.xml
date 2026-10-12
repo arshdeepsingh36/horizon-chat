@@ -59,7 +59,18 @@
             android:paddingHorizontal="16dp"
             android:textColor="@color/text_primary"
             android:textColorHint="@color/text_muted"
-            android:layout_marginBottom="20dp" />
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/btnForgotPassword"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:text="Forgot Password?"
+            android:textColor="@color/accent_amber"
+            android:textSize="13sp"
+            android:padding="6dp"
+            android:layout_marginBottom="16dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnLogin"

@@ -205,7 +205,6 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
 
     override fun onResume() {
         super.onResume()
-        HorizonNotificationManager.activeChatPartnerId = targetUserId
         MessageDispatchManager.setCurrentUser(currentUserId)
         MessageDispatchManager.setActivePartner(targetUserId)
         if (authToken.isNotEmpty()) {
@@ -220,10 +219,14 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
                 val latestId = cachedMessageList
                     .filter { it.status != "PENDING" && it.id > 0L && it.id < 1000000000000L }
                     .maxOfOrNull { it.id } ?: 0L
+                if (latestId <= 0L) {
+                    // Do not sync if initial load has not completed yet, avoiding duplication
+                    return@launch
+                }
                 val res = ApiClient.apiService.syncMessages(
                     token = "Bearer $authToken",
                     targetUserId = targetUserId,
-                    sinceId = if (latestId > 0) latestId else null
+                    sinceId = latestId
                 )
                 if (res.isSuccessful && res.body() != null) {
                     val newBatch = res.body()!!
@@ -247,7 +250,6 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
 
     override fun onPause() {
         super.onPause()
-        HorizonNotificationManager.activeChatPartnerId = null
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -531,15 +533,14 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
         val menuBinding = DialogMessageContextMenuBinding.inflate(layoutInflater)
         bottomSheet.setContentView(menuBinding.root)
 
-        // Setup reactions
+        // Setup reactions strictly for 👍, ❤️, 😂, 😮, 😢, 🙏
         val emojis = mapOf(
-            menuBinding.btnReactionHeart to "❤️",
             menuBinding.btnReactionThumbsUp to "👍",
-            menuBinding.btnReactionThumbsDown to "👎",
-            menuBinding.btnReactionFire to "🔥",
-            menuBinding.btnReactionInLove to "🥰",
-            menuBinding.btnReactionClap to "👏",
-            menuBinding.btnReactionJoy to "😂"
+            menuBinding.btnReactionHeart to "❤️",
+            menuBinding.btnReactionJoy to "😂",
+            menuBinding.btnReactionSurprised to "😮",
+            menuBinding.btnReactionCry to "😢",
+            menuBinding.btnReactionPray to "🙏"
         )
 
         emojis.forEach { (view, emoji) ->

@@ -149,14 +149,20 @@ object MessageDispatchManager {
                 val handleRead = { args: Array<Any> ->
                     if (args.isNotEmpty()) {
                         val data = args[0] as? JSONObject
+                        val isAll = data?.optBoolean("all", false) ?: false
                         val mId = data?.optLong("messageId", -1L) ?: (data?.optLong("id", -1L) ?: -1L)
-                        if (mId > 0) {
+                        val readerId = data?.optInt("readBy", data.optInt("seenBy", 0)) ?: 0
+                        if (isAll) {
+                            listeners.forEach { it.onConversationRead(readerId, activePartnerId, "") }
+                        } else if (mId > 0) {
                             listeners.forEach { it.onMessageStatusUpdated(mId, null, "READ") }
                         }
                     }
                 }
                 on("message_read_ack", handleRead)
                 on("message_read", handleRead)
+                on("message_seen_ack", handleRead)
+                on("message_seen", handleRead)
 
                 on("conversation_read") { args ->
                     if (args.isNotEmpty()) {
@@ -195,21 +201,28 @@ object MessageDispatchManager {
                 on("message_reacted", handleReactionEvent)
                 on("message_reaction_updated", handleReactionEvent)
 
-                on("message_deleted") { args ->
+                val handleDeleteEvent = { args: Array<Any> ->
                     if (args.isNotEmpty()) {
-                        val data = args[0] as? JSONObject ?: return@on
-                        val mId = data.optLong("messageId")
-                        val deletedForEveryone = data.optBoolean("deletedForEveryone", false)
-                        val deletedArr = data.optJSONArray("deletedByUsers")
-                        val deletedUsers = mutableListOf<Int>()
-                        if (deletedArr != null) {
-                            for (i in 0 until deletedArr.length()) {
-                                deletedUsers.add(deletedArr.optInt(i))
+                        val data = args[0] as? JSONObject
+                        if (data != null) {
+                            val mId = data.optLong("messageId", data.optLong("id", -1L))
+                            val isExpired = data.optBoolean("expired", false)
+                            val deletedForEveryone = data.optBoolean("deletedForEveryone", isExpired)
+                            val deletedArr = data.optJSONArray("deletedByUsers")
+                            val deletedUsers = mutableListOf<Int>()
+                            if (deletedArr != null) {
+                                for (i in 0 until deletedArr.length()) {
+                                    deletedUsers.add(deletedArr.optInt(i))
+                                }
+                            }
+                            if (mId > 0) {
+                                listeners.forEach { it.onMessageDeleted(mId, deletedForEveryone, deletedUsers) }
                             }
                         }
-                        listeners.forEach { it.onMessageDeleted(mId, deletedForEveryone, deletedUsers) }
                     }
                 }
+                on("message_deleted", handleDeleteEvent)
+                on("message_expired", handleDeleteEvent)
 
                 on("message_pinned") { args ->
                     if (args.isNotEmpty()) {

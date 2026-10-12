@@ -122,24 +122,114 @@ class PhotoViewerActivity : AppCompatActivity() {
         }
     }
 
+    private var currentScale = 1f
+    private val minScale = 1f
+    private val maxScale = 5f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var activePointerId = MotionEvent.INVALID_POINTER_ID
+
     private fun setupZoomTouchListener() {
+        binding.ivFullPhoto.scaleType = ImageView.ScaleType.MATRIX
+
         scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val scaleFactor = detector.scaleFactor
-                matrix.postScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
-                binding.ivFullPhoto.imageMatrix = matrix
+                var scaleFactor = detector.scaleFactor
+                val targetScale = currentScale * scaleFactor
+
+                if (targetScale in minScale..maxScale) {
+                    currentScale = targetScale
+                    matrix.postScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
+                    binding.ivFullPhoto.imageMatrix = matrix
+                } else if (targetScale < minScale && currentScale > minScale) {
+                    scaleFactor = minScale / currentScale
+                    currentScale = minScale
+                    matrix.postScale(scaleFactor, scaleFactor, detector.focusX, detector.focusY)
+                    binding.ivFullPhoto.imageMatrix = matrix
+                }
                 return true
             }
         })
 
-        binding.ivFullPhoto.scaleType = ImageView.ScaleType.FIT_CENTER
+        var startX = 0f
+        var startY = 0f
+        var isClick = false
+
         binding.ivFullPhoto.setOnTouchListener { _, event ->
             scaleDetector.onTouchEvent(event)
-            if (event.action == MotionEvent.ACTION_UP) {
-                toggleControls()
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    lastTouchX = event.x
+                    lastTouchY = event.y
+                    startX = event.x
+                    startY = event.y
+                    isClick = true
+                    activePointerId = event.getPointerId(0)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val pointerIndex = event.findPointerIndex(activePointerId)
+                    if (pointerIndex != -1) {
+                        val x = event.getX(pointerIndex)
+                        val y = event.getY(pointerIndex)
+                        val dx = x - lastTouchX
+                        val dy = y - lastTouchY
+
+                        if (Math.abs(x - startX) > 10 || Math.abs(y - startY) > 10) {
+                            isClick = false
+                        }
+
+                        if (currentScale > 1f && !scaleDetector.isInProgress) {
+                            matrix.postTranslate(dx, dy)
+                            binding.ivFullPhoto.imageMatrix = matrix
+                        }
+
+                        lastTouchX = x
+                        lastTouchY = y
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                    if (isClick) {
+                        toggleControls()
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                }
+                MotionEvent.ACTION_POINTER_UP -> {
+                    val pointerIndex = event.actionIndex
+                    val pointerId = event.getPointerId(pointerIndex)
+                    if (pointerId == activePointerId) {
+                        val newPointerIndex = if (pointerIndex == 0) 1 else 0
+                        lastTouchX = event.getX(newPointerIndex)
+                        lastTouchY = event.getY(newPointerIndex)
+                        activePointerId = event.getPointerId(newPointerIndex)
+                    }
+                }
             }
             true
         }
+    }
+
+    private fun fitImageToCenter(bitmap: Bitmap) {
+        val viewWidth = binding.ivFullPhoto.width.toFloat().takeIf { it > 0 } ?: resources.displayMetrics.widthPixels.toFloat()
+        val viewHeight = binding.ivFullPhoto.height.toFloat().takeIf { it > 0 } ?: resources.displayMetrics.heightPixels.toFloat()
+        val drawableWidth = bitmap.width.toFloat()
+        val drawableHeight = bitmap.height.toFloat()
+
+        if (drawableWidth <= 0 || drawableHeight <= 0) return
+
+        val scale = Math.min(viewWidth / drawableWidth, viewHeight / drawableHeight)
+        val dx = (viewWidth - drawableWidth * scale) / 2f
+        val dy = (viewHeight - drawableHeight * scale) / 2f
+
+        matrix.reset()
+        matrix.postScale(scale, scale)
+        matrix.postTranslate(dx, dy)
+        currentScale = 1f
+        binding.ivFullPhoto.scaleType = ImageView.ScaleType.MATRIX
+        binding.ivFullPhoto.imageMatrix = matrix
     }
 
     private fun resolveMediaUrl(raw: String): String {
@@ -196,6 +286,7 @@ class PhotoViewerActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         binding.pbPhotoLoading.visibility = View.GONE
                         binding.ivFullPhoto.setImageBitmap(bmp)
+                        binding.ivFullPhoto.post { bmp?.let { fitImageToCenter(it) } }
                     }
                     return@launch
                 }
@@ -210,6 +301,7 @@ class PhotoViewerActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             binding.pbPhotoLoading.visibility = View.GONE
                             binding.ivFullPhoto.setImageBitmap(bmp)
+                            binding.ivFullPhoto.post { bmp?.let { fitImageToCenter(it) } }
                         }
                         return@launch
                     }
@@ -228,6 +320,7 @@ class PhotoViewerActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     binding.pbPhotoLoading.visibility = View.GONE
                     binding.ivFullPhoto.setImageBitmap(bmp)
+                    binding.ivFullPhoto.post { bmp?.let { fitImageToCenter(it) } }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

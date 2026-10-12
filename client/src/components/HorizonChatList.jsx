@@ -13,7 +13,8 @@ import {
   Camera,
   Upload,
   Settings,
-  Edit3
+  Edit3,
+  Shield
 } from 'lucide-react';
 import { uploadToR2 } from '../utils/r2Upload';
 
@@ -24,7 +25,8 @@ export default function HorizonChatList({
   onLogout,
   apiBaseUrl,
   token,
-  onUpdateUser
+  onUpdateUser,
+  onOpenAdmin
 }) {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -264,6 +266,18 @@ export default function HorizonChatList({
         </div>
 
         <div className="horizon-toolbar-actions">
+          {(user.isAdmin || user.is_admin) && onOpenAdmin && (
+            <button
+              className="horizon-dock-clip"
+              onClick={onOpenAdmin}
+              title="Super User Admin Dashboard"
+              id="btnAdminDashboard"
+              style={{ color: '#F59E0B' }}
+            >
+              <Shield size={19} />
+            </button>
+          )}
+
           <button
             className="horizon-dock-clip"
             onClick={() => setShowSearch(!showSearch)}
@@ -293,7 +307,7 @@ export default function HorizonChatList({
                   border: '1px solid rgba(245, 158, 11, 0.25)',
                   borderRadius: '12px',
                   padding: '8px 0',
-                  width: '170px',
+                  width: '180px',
                   boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
                   zIndex: 100
                 }}
@@ -308,7 +322,39 @@ export default function HorizonChatList({
                 >
                   Signed in as<br />
                   <strong style={{ color: 'var(--color-text-primary)' }}>@{user.username}</strong>
+                  {(user.isAdmin || user.is_admin) && (
+                    <span style={{ display: 'inline-block', marginLeft: '6px', fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.2)', color: '#F59E0B', fontWeight: 700 }}>ADMIN</span>
+                  )}
                 </div>
+
+                {(user.isAdmin || user.is_admin) && onOpenAdmin && (
+                  <button
+                    onClick={() => {
+                      setShowMenu(false);
+                      onOpenAdmin();
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      color: '#F59E0B',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      cursor: 'pointer'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-surface)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                  >
+                    <Shield size={15} color="#F59E0B" />
+                    <span>Admin Dashboard</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setShowMenu(false);

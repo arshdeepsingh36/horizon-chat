@@ -4,6 +4,7 @@ import AndroidStatusBar from './components/AndroidStatusBar';
 import HorizonAuth from './components/HorizonAuth';
 import HorizonChatList from './components/HorizonChatList';
 import HorizonChatView from './components/HorizonChatView';
+import AdminDashboard from './components/AdminDashboard';
 import { Smartphone, Monitor } from 'lucide-react';
 import './App.css';
 
@@ -21,6 +22,7 @@ export default function App() {
   const [socket, setSocket] = useState(null);
   const [chats, setChats] = useState([]);
   const [activePartner, setActivePartner] = useState(null); // { id, username, online }
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   const [isPhoneFrame, setIsPhoneFrame] = useState(true);
 
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
@@ -144,57 +146,7 @@ export default function App() {
     };
   }, [token, user?.id, apiBaseUrl, refreshChats, activePartner?.id]);
 
-  // Push Notification Subscription (Web Push)
-  useEffect(() => {
-    if (!token || !user || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
-    const urlBase64ToUint8Array = (base64String) => {
-      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-      const rawData = window.atob(base64);
-      const outputArray = new Uint8Array(rawData.length);
-      for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-      }
-      return outputArray;
-    };
-
-    const setupPush = async () => {
-      try {
-        const registration = await navigator.serviceWorker.register('/sw.js');
-        const perm = await Notification.requestPermission();
-        if (perm !== 'granted') return;
-
-        const keyRes = await fetch(`${apiBaseUrl}/api/notifications/vapid-public-key`);
-        const { publicKey } = await keyRes.json();
-        if (!publicKey) return;
-
-        let subscription = await registration.pushManager.getSubscription();
-        if (!subscription) {
-          subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(publicKey)
-          });
-        }
-
-        await fetch(`${apiBaseUrl}/api/notifications/register-token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            subscription,
-            deviceType: 'web'
-          })
-        });
-      } catch (err) {
-        console.warn('[PUSH REGISTRATION NOTICE]', err.message);
-      }
-    };
-
-    setupPush();
-  }, [token, user, apiBaseUrl]);
 
   // Silent sync on visibilitychange & window focus (catch missed messages while inactive)
   useEffect(() => {
@@ -279,6 +231,13 @@ export default function App() {
         {/* Dynamic View State */}
         {!token || !user ? (
           <HorizonAuth onLogin={handleLogin} apiBaseUrl={apiBaseUrl} />
+        ) : showAdminDashboard ? (
+          <AdminDashboard
+            user={user}
+            token={token}
+            apiBaseUrl={apiBaseUrl}
+            onBack={() => setShowAdminDashboard(false)}
+          />
         ) : activePartner ? (
           <HorizonChatView
             user={user}
@@ -299,6 +258,7 @@ export default function App() {
             apiBaseUrl={apiBaseUrl}
             token={token}
             onUpdateUser={handleUpdateUser}
+            onOpenAdmin={() => setShowAdminDashboard(true)}
           />
         )}
 

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.chatapp.horizon">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -10,7 +9,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> removed per requirements -->
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -36,6 +35,7 @@
         <activity
             android:name="com.chatapp.horizon.ui.AuthActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -45,34 +45,44 @@
 
         <activity
             android:name="com.chatapp.horizon.ui.ChatListActivity"
-            android:exported="true" />
+            android:exported="true"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name="com.chatapp.horizon.ui.ChatActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name="com.chatapp.horizon.ui.ProfileActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name="com.chatapp.horizon.ui.UserProfileActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name="com.chatapp.horizon.ui.VideoPlayerActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:screenOrientation="sensor" />
+            android:screenOrientation="portrait" />
 
         <activity
             android:name="com.chatapp.horizon.ui.PhotoViewerActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:screenOrientation="sensor" />
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name="com.chatapp.horizon.ui.AdminDashboardActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
 
     </application>
 

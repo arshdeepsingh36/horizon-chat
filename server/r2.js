@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import fs from 'fs';
 import path from 'path';
@@ -253,6 +253,30 @@ export async function generatePresignedDownloadUrl({ key, expiresIn = 3600 }) {
   return await getSignedUrl(client, command, { expiresIn });
 }
 
+/**
+ * Delete an object from Cloudflare R2 storage
+ * @param {string} key - R2 object key
+ * @returns {Promise<boolean>}
+ */
+export async function deleteR2Object(key) {
+  const client = getR2Client();
+  if (!client || !key) return false;
+  try {
+    const { bucketName } = getR2Config();
+    const cleanKey = key.startsWith('/') ? key.slice(1) : key;
+    const command = new DeleteObjectCommand({
+      Bucket: bucketName,
+      Key: cleanKey,
+    });
+    await client.send(command);
+    console.log(`[R2 DELETE] Successfully deleted object: ${cleanKey}`);
+    return true;
+  } catch (err) {
+    console.error(`[R2 DELETE ERROR] Failed to delete object ${key}:`, err.message);
+    return false;
+  }
+}
+
 export default {
   getR2Config,
   isR2Configured,
@@ -264,4 +288,5 @@ export default {
   getR2PublicUrl,
   generatePresignedUploadUrl,
   generatePresignedDownloadUrl,
+  deleteR2Object,
 };

@@ -35,14 +35,22 @@ import {
   deletePushToken,
   getPushTokensByUserId,
   getUnreadOrRecentMessages,
-  markPendingMessagesDelivered
+  markPendingMessagesDelivered,
+  getAllUsersAdmin,
+  updateUserStatusAdmin,
+  resetUserPasswordAdmin,
+  getSystemStatsAdmin,
+  setUserResetToken,
+  verifyAndResetPassword
 } from './db.js';
 import {
   isR2Configured,
   getR2Client,
+  getR2Config,
   buildR2Key,
   generatePresignedUploadUrl,
-  getR2PublicUrl
+  getR2PublicUrl,
+  deleteR2Object
 } from './r2.js';
 import fs from 'fs';
 import path from 'path';
@@ -82,44 +90,9 @@ try {
   console.error('[PUSH ERROR] Failed to set VAPID details:', err);
 }
 
-// Push notification dispatch helper
-export async function dispatchPushNotification(recipientId, { title, body, data = {} }) {
-  try {
-    const tokens = await getPushTokensByUserId(Number(recipientId));
-    if (!tokens || tokens.length === 0) return;
-
-    // Strict requirement: Notification body must strictly display: "Update....."
-    const payload = JSON.stringify({
-      title: title || 'New Message',
-      body: 'Update.....',
-      icon: '/horizon icon.ico',
-      badge: '/horizon icon.ico',
-      data: {
-        ...data,
-        timestamp: Date.now()
-      }
-    });
-
-    for (const record of tokens) {
-      if (record.device_type === 'web') {
-        try {
-          const subscription = typeof record.token === 'string' ? JSON.parse(record.token) : record.token;
-          await webpush.sendNotification(subscription, payload);
-        } catch (pushErr) {
-          if (pushErr.statusCode === 404 || pushErr.statusCode === 410) {
-            console.log(`[PUSH] Token expired for user ${recipientId}, deleting.`);
-            await deletePushToken(Number(recipientId), record.token).catch(() => {});
-          } else {
-            console.warn(`[PUSH WARNING] Failed to send web push:`, pushErr.message);
-          }
-        }
-      } else {
-        console.log(`[PUSH] Mobile push notification dispatched for user ${recipientId} (${record.device_type})`);
-      }
-    }
-  } catch (err) {
-    console.error('[PUSH DISPATCH ERROR]', err);
-  }
+// Push notification dispatching disabled and cleaned up per specification
+export async function dispatchPushNotification() {
+  return;
 }
 
 const PORT = process.env.PORT || 5000;
@@ -183,6 +156,13 @@ function authenticateToken(req, res, next) {
   });
 }
 
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Administrator access required.' });
+  }
+  next();
+}
+
 // Rate Limiter
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -225,14 +205,22 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     }
 
     const hash = await bcrypt.hash(password, 10);
-    const user = await createUser(clean, hash);
+    const isAdmin = clean.toLowerCase() === 'admin';
+    const user = await createUser(clean, hash, clean, isAdmin);
 
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ id: user.id, username: user.username, isAdmin: user.isAdmin }, JWT_SECRET, { expiresIn: '30d' });
 
-    console.log(`[AUTH] Registered: @${user.username} (ID: ${user.id})`);
+    console.log(`[AUTH] Registered: @${user.username} (ID: ${user.id}, Admin: ${user.isAdmin})`);
     return res.status(201).json({
       token,
-      user: { id: user.id, username: user.username }
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        isAdmin: user.isAdmin,
+        is_admin: user.isAdmin,
+        isActive: user.isActive
+      }
     });
   } catch (err) {
     console.error('[REGISTER ERROR]', err);
@@ -253,16 +241,264 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+    if (user.isActive === false) {
+      return res.status(403).json({ error: 'Your account has been deactivated by an administrator.' });
+    }
 
-    console.log(`[AUTH] Logged in: @${user.username} (ID: ${user.id})`);
+    const token = jwt.sign({ id: user.id, username: user.username, isAdmin: user.isAdmin }, JWT_SECRET, { expiresIn: '30d' });
+
+    console.log(`[AUTH] Logged in: @${user.username} (ID: ${user.id}, Admin: ${user.isAdmin})`);
     return res.json({
       token,
-      user: { id: user.id, username: user.username }
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        isAdmin: user.isAdmin,
+        is_admin: user.isAdmin,
+        isActive: user.isActive
+      }
     });
   } catch (err) {
     console.error('[LOGIN ERROR]', err);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 2b. Forgot Password - Generate Reset Code
+app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { username } = req.body || {};
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+
+    const user = await findUserByUsername(username.trim());
+    if (!user) {
+      // Prevent user enumeration by returning generic response
+      return res.json({ success: true, message: 'If an account exists with that username, a reset code has been generated.' });
+    }
+
+    // 6-digit numeric reset token
+    const token = Math.floor(100000 + Math.random() * 900000).toString();
+    await setUserResetToken(user.username, token, 15);
+
+    console.log(`[AUTH] Password reset token generated for @${user.username}: ${token}`);
+    return res.json({
+      success: true,
+      message: 'Password reset code generated. Valid for 15 minutes.',
+      resetToken: token // Included for rapid self-service verification
+    });
+  } catch (err) {
+    console.error('[FORGOT PASSWORD ERROR]', err);
+    return res.status(500).json({ error: 'Failed to process forgot password request' });
+  }
+});
+
+// 2c. Reset Password - Verify Code and Set New Password
+app.post('/api/auth/reset-password', authLimiter, async (req, res) => {
+  try {
+    const { username, token, newPassword } = req.body || {};
+    if (!username || !token || !newPassword) {
+      return res.status(400).json({ error: 'Username, reset token, and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    const updated = await verifyAndResetPassword(username.trim(), token.trim(), hash);
+
+    if (!updated) {
+      return res.status(400).json({ error: 'Invalid or expired reset token' });
+    }
+
+    console.log(`[AUTH] Password reset successfully for @${username}`);
+    return res.json({ success: true, message: 'Password has been reset successfully. You can now log in.' });
+  } catch (err) {
+    console.error('[RESET PASSWORD ERROR]', err);
+    return res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// Admin API Endpoints
+app.get('/api/admin/stats', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const stats = await getSystemStatsAdmin();
+    return res.json({
+      ...stats,
+      activeConnections: onlineUsers.size,
+      onlineUsersCount: onlineUsers.size
+    });
+  } catch (err) {
+    console.error('[ADMIN STATS ERROR]', err);
+    return res.status(500).json({ error: 'Failed to fetch admin stats' });
+  }
+});
+
+app.get('/api/admin/users', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const users = await getAllUsersAdmin();
+    const enriched = users.map(u => ({
+      ...u,
+      online: isUserOnline(u.id)
+    }));
+    return res.json(enriched);
+  } catch (err) {
+    console.error('[ADMIN GET USERS ERROR]', err);
+    return res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.patch('/api/admin/users/:userId/status', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const targetUserId = parseInt(req.params.userId, 10);
+    const { isActive } = req.body;
+    if (isNaN(targetUserId) || typeof isActive !== 'boolean') {
+      return res.status(400).json({ error: 'Valid userId and boolean isActive are required' });
+    }
+
+    const updated = await updateUserStatusAdmin(targetUserId, isActive);
+    if (!updated) return res.status(404).json({ error: 'User not found' });
+
+    // Disconnect active sockets if deactivated
+    if (!isActive) {
+      const targetSockets = onlineUsers.get(targetUserId);
+      if (targetSockets) {
+        targetSockets.forEach(sId => {
+          const s = io.sockets.sockets.get(sId);
+          if (s) s.disconnect(true);
+        });
+      }
+    }
+
+    return res.json({ success: true, user: updated });
+  } catch (err) {
+    console.error('[ADMIN UPDATE STATUS ERROR]', err);
+    return res.status(500).json({ error: 'Failed to update user status' });
+  }
+});
+
+app.post('/api/admin/users/:userId/reset-password', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const targetUserId = parseInt(req.params.userId, 10);
+    const { newPassword } = req.body;
+    if (isNaN(targetUserId) || !newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Valid userId and password (min 6 characters) required' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    const updated = await resetUserPasswordAdmin(targetUserId, hash);
+    if (!updated) return res.status(404).json({ error: 'User not found' });
+
+    return res.json({ success: true, message: `Password reset for user ${updated.username}` });
+  } catch (err) {
+    console.error('[ADMIN RESET PASSWORD ERROR]', err);
+    return res.status(500).json({ error: 'Failed to reset user password' });
+  }
+});
+
+app.post('/api/admin/purge-messages', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const hours = parseInt(req.body?.hours, 10) || 24;
+    const result = await deleteExpiredSeenMessages(hours);
+
+    // Delete associated media in Cloudflare R2
+    for (const msg of result.expiredMessages || []) {
+      if (msg.r2Key) {
+        try {
+          await deleteR2Object(msg.r2Key);
+        } catch (r2Err) {
+          console.error('[MANUAL PURGE R2 ERROR]', r2Err);
+        }
+      }
+
+      // Realtime drop broadcast
+      const mId = Number(msg.id);
+      const sId = Number(msg.senderId);
+      const rId = Number(msg.recipientId);
+      const convRoom = `chat_${Math.min(sId, rId)}_${Math.max(sId, rId)}`;
+      const payload = { messageId: mId, id: mId, expired: true, mode: 'everyone' };
+      io.to(convRoom).emit('message_deleted', payload);
+      io.to(convRoom).emit('message_expired', payload);
+    }
+
+    return res.json({
+      success: true,
+      deletedCount: result.deletedCount,
+      message: `Successfully purged ${result.deletedCount} messages older than ${hours} hours post-seen.`
+    });
+  } catch (err) {
+    console.error('[ADMIN PURGE ERROR]', err);
+    return res.status(500).json({ error: 'Failed to purge messages' });
+  }
+});
+
+// Byte-Range Video & Media Streaming Endpoint (Instant Playback Support)
+app.get('/api/media/stream', (req, res) => {
+  try {
+    const fileParam = req.query.file || req.query.key || req.query.path;
+    if (!fileParam) {
+      return res.status(400).json({ error: 'File parameter is required' });
+    }
+
+    // Direct redirect if full external HTTP/HTTPS URL
+    if (fileParam.startsWith('http://') || fileParam.startsWith('https://')) {
+      return res.redirect(fileParam);
+    }
+
+    const safeFile = path.basename(fileParam);
+    const filePath = path.join(uploadsDir, safeFile);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Media file not found' });
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const ext = path.extname(filePath).toLowerCase();
+    let contentType = 'video/mp4';
+    if (ext === '.webm') contentType = 'video/webm';
+    else if (ext === '.mov') contentType = 'video/quicktime';
+    else if (ext === '.m4a') contentType = 'audio/mp4';
+    else if (ext === '.mp3') contentType = 'audio/mpeg';
+    else if (ext === '.wav') contentType = 'audio/wav';
+
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (start >= fileSize) {
+        res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+        return res.end();
+      }
+
+      const chunksize = (end - start) + 1;
+      const fileStream = fs.createReadStream(filePath, { start, end });
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunksize,
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000'
+      });
+      fileStream.pipe(res);
+    } else {
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=31536000'
+      });
+      fs.createReadStream(filePath).pipe(res);
+    }
+  } catch (err) {
+    console.error('[STREAM ERROR]', err);
+    return res.status(500).json({ error: 'Streaming error' });
   }
 });
 
@@ -599,6 +835,8 @@ app.delete('/api/messages/:id', authenticateToken, async (req, res) => {
     console.error('[DELETE MESSAGE REST ERROR]', err);
     return res.status(err.statusCode || 500).json({ error: err.message || 'Failed to delete message' });
   }
+});
+
 // 3j2. Toggle Message Reaction
 app.post('/api/messages/:id/react', authenticateToken, async (req, res) => {
   try {
@@ -1082,20 +1320,6 @@ io.on('connection', (socket) => {
         recipientSockets.forEach(sockId => {
           io.to(sockId).emit('new_message', savedRecord);
         });
-      } else {
-        // Recipient is offline / disconnected -> Trigger Web / Mobile Push Notification strictly with body "Update....."
-        const senderUser = socket.user;
-        const senderDisplayName = senderUser.displayName || senderUser.username || 'Someone';
-
-        dispatchPushNotification(rId, {
-          title: senderDisplayName,
-          body: 'Update.....',
-          data: {
-            senderId: userId,
-            recipientId: rId,
-            messageId: savedRecord.id
-          }
-        }).catch(e => console.error('[PUSH NOTIFY ERROR]', e));
       }
 
       // 4. Emit to sender's other sockets only (multi-device sync) - NOT to originating socket
@@ -1193,7 +1417,7 @@ io.on('connection', (socket) => {
   socket.on('mark_delivered', handleDelivered);
   socket.on('message_delivered', handleDelivered);
 
-  // Read Receipt Acknowledgement (mark_read & message_read)
+  // Read & Seen Receipt Acknowledgement (mark_read, message_read, mark_seen, message_seen)
   const handleRead = async (payload) => {
     const messageId = payload?.messageId || payload?.id;
     const senderId = payload?.senderId;
@@ -1210,7 +1434,8 @@ io.on('connection', (socket) => {
         status: 'READ',
         senderId: targetSenderId,
         recipientId: userId,
-        readAt: new Date().toISOString()
+        readAt: new Date().toISOString(),
+        seenAt: new Date().toISOString()
       };
 
       if (targetSenderId) {
@@ -1219,20 +1444,25 @@ io.on('connection', (socket) => {
           senderSockets.forEach(sockId => {
             io.to(sockId).emit('message_read_ack', statusPayload);
             io.to(sockId).emit('message_read', statusPayload);
+            io.to(sockId).emit('message_seen_ack', statusPayload);
+            io.to(sockId).emit('message_seen', statusPayload);
             io.to(sockId).emit('message_status_update', statusPayload);
           });
         }
         const convRoom = `chat_${Math.min(userId, targetSenderId)}_${Math.max(userId, targetSenderId)}`;
         io.to(convRoom).emit('message_status_update', statusPayload);
         io.to(convRoom).emit('message_read', statusPayload);
+        io.to(convRoom).emit('message_seen', statusPayload);
       }
     } catch (err) {
-      console.error('[READ RECEIPT ERROR]', err);
+      console.error('[READ/SEEN RECEIPT ERROR]', err);
     }
   };
 
   socket.on('mark_read', handleRead);
   socket.on('message_read', handleRead);
+  socket.on('mark_seen', handleRead);
+  socket.on('message_seen', handleRead);
 
   // Message Reactions (Real-Time Synchronized across Android and Web)
   const handleReactionEvent = async (data, callback) => {
@@ -1379,17 +1609,22 @@ io.on('connection', (socket) => {
       const pId = Number(partnerId);
       await markConversationRead(userId, pId);
       const partnerSockets = onlineUsers.get(pId);
+      const nowIso = new Date().toISOString();
+      const payload = { all: true, status: 'READ', readBy: userId, seenBy: userId, readAt: nowIso, seenAt: nowIso };
       if (partnerSockets) {
         partnerSockets.forEach(sockId => {
-          io.to(sockId).emit('conversation_read', { readerId: userId, partnerId: pId, readAt: new Date().toISOString() });
-          io.to(sockId).emit('message_read_ack', { all: true, readBy: userId });
-          io.to(sockId).emit('message_read', { all: true, readBy: userId });
-          io.to(sockId).emit('message_status_update', { all: true, status: 'READ', readBy: userId });
+          io.to(sockId).emit('conversation_read', { readerId: userId, partnerId: pId, readAt: nowIso, seenAt: nowIso });
+          io.to(sockId).emit('message_read_ack', payload);
+          io.to(sockId).emit('message_read', payload);
+          io.to(sockId).emit('message_seen_ack', payload);
+          io.to(sockId).emit('message_seen', payload);
+          io.to(sockId).emit('message_status_update', payload);
         });
       }
       const convRoom = `chat_${Math.min(userId, pId)}_${Math.max(userId, pId)}`;
-      io.to(convRoom).emit('message_status_update', { all: true, status: 'READ', readBy: userId });
-      io.to(convRoom).emit('message_read', { all: true, readBy: userId });
+      io.to(convRoom).emit('message_status_update', payload);
+      io.to(convRoom).emit('message_read', payload);
+      io.to(convRoom).emit('message_seen', payload);
     } catch (err) {
       console.error('[CONVERSATION READ ERROR]', err);
     }
@@ -1423,6 +1658,47 @@ io.on('connection', (socket) => {
     }
   });
 });
+
+// Scheduled 24-Hour Post-Seen Ephemeral Cleanup Worker
+async function runEphemeralSeenCleanup() {
+  try {
+    const result = await deleteExpiredSeenMessages(24);
+    if (result && result.deletedCount > 0) {
+      console.log(`[EPHEMERAL CLEANUP] Automatically deleted ${result.deletedCount} messages seen > 24 hours ago.`);
+      for (const msg of result.expiredMessages || []) {
+        if (msg.r2Key) {
+          try {
+            await deleteR2Object(msg.r2Key);
+          } catch (r2Err) {
+            console.error('[EPHEMERAL R2 PURGE ERROR]', r2Err);
+          }
+        }
+        // Emit real-time drop event to clients
+        const mId = Number(msg.id);
+        const sId = Number(msg.senderId);
+        const rId = Number(msg.recipientId);
+        const convRoom = `chat_${Math.min(sId, rId)}_${Math.max(sId, rId)}`;
+        const payload = { messageId: mId, id: mId, expired: true, mode: 'everyone' };
+        io.to(convRoom).emit('message_deleted', payload);
+        io.to(convRoom).emit('message_expired', payload);
+        [sId, rId].forEach(uId => {
+          const uSockets = onlineUsers.get(uId);
+          if (uSockets) {
+            uSockets.forEach(s => {
+              io.to(s).emit('message_deleted', payload);
+              io.to(s).emit('message_expired', payload);
+            });
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[EPHEMERAL CLEANUP ERROR]', err);
+  }
+}
+
+// Run cleanup check every 60 seconds
+setInterval(runEphemeralSeenCleanup, 60 * 1000);
 
 async function start() {
   try {

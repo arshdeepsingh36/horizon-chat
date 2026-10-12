@@ -83,6 +83,12 @@ async function initSqlite() {
       sqliteDb.run(`ALTER TABLE messages ADD COLUMN deleted_for_everyone INTEGER DEFAULT 0;`, () => {});
       sqliteDb.run(`ALTER TABLE messages ADD COLUMN deleted_by_users TEXT DEFAULT '[]';`, () => {});
       sqliteDb.run(`ALTER TABLE messages ADD COLUMN read_at DATETIME;`, () => {});
+      sqliteDb.run(`ALTER TABLE messages ADD COLUMN seen_at DATETIME;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN is_admin INTEGER DEFAULT 0;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN is_superuser INTEGER DEFAULT 0;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN is_active INTEGER DEFAULT 1;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN reset_token TEXT;`, () => {});
+      sqliteDb.run(`ALTER TABLE accounts ADD COLUMN reset_token_expires DATETIME;`, () => {});
 
       sqliteDb.run(`
         CREATE TABLE IF NOT EXISTS user_blocks (
@@ -185,6 +191,12 @@ export async function initDb() {
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_for_everyone BOOLEAN DEFAULT FALSE;
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by_users TEXT DEFAULT '[]';
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS seen_at TIMESTAMP WITH TIME ZONE;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN DEFAULT FALSE;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS reset_token TEXT;
+        ALTER TABLE accounts ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP WITH TIME ZONE;
 
         CREATE TABLE IF NOT EXISTS user_blocks (
           id SERIAL PRIMARY KEY,
@@ -226,23 +238,52 @@ export async function initDb() {
   await initSqlite();
 }
 
+// User Formatting Helper
+export function formatUser(u) {
+  if (!u) return null;
+  return {
+    id: Number(u.id),
+    username: u.username,
+    password_hash: u.password_hash,
+    passwordHash: u.password_hash,
+    displayName: u.display_name || u.displayName || u.username,
+    display_name: u.display_name || u.displayName || u.username,
+    bioStatus: u.bio_status || u.bioStatus || 'Hey there! I am using Horizon Chat.',
+    bio_status: u.bio_status || u.bioStatus || 'Hey there! I am using Horizon Chat.',
+    avatarUrl: u.avatar_url || u.avatarUrl || null,
+    avatar_url: u.avatar_url || u.avatarUrl || null,
+    lastSeen: u.last_seen || u.lastSeen || null,
+    last_seen: u.last_seen || u.lastSeen || null,
+    isAdmin: Boolean(u.is_admin || u.is_superuser),
+    is_admin: Boolean(u.is_admin || u.is_superuser),
+    isActive: u.is_active === undefined || u.is_active === null ? true : (u.is_active === 1 || u.is_active === true || u.is_active === '1'),
+    is_active: u.is_active === undefined || u.is_active === null ? true : (u.is_active === 1 || u.is_active === true || u.is_active === '1'),
+    resetToken: u.reset_token || null,
+    reset_token: u.reset_token || null,
+    resetTokenExpires: u.reset_token_expires || null,
+    reset_token_expires: u.reset_token_expires || null,
+    createdAt: u.created_at || u.createdAt || null,
+    created_at: u.created_at || u.createdAt || null
+  };
+}
+
 // User Methods
 export async function findUserByUsername(username) {
   const normalized = username.trim();
   if (isPg) {
     const res = await pgPool.query(
-      'SELECT id, username, password_hash, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      'SELECT * FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
       [normalized]
     );
-    return res.rows[0] || null;
+    return res.rows[0] ? formatUser(res.rows[0]) : null;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.get(
-        'SELECT id, username, password_hash, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
+        'SELECT * FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
         [normalized],
         (err, row) => {
           if (err) return reject(err);
-          resolve(row || null);
+          resolve(row ? formatUser(row) : null);
         }
       );
     });
@@ -252,41 +293,44 @@ export async function findUserByUsername(username) {
 export async function findUserById(id) {
   if (isPg) {
     const res = await pgPool.query(
-      'SELECT id, username, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE id = $1 LIMIT 1',
+      'SELECT * FROM accounts WHERE id = $1 LIMIT 1',
       [id]
     );
-    return res.rows[0] || null;
+    return res.rows[0] ? formatUser(res.rows[0]) : null;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.get(
-        'SELECT id, username, display_name, bio_status, avatar_url, last_seen, created_at FROM accounts WHERE id = ? LIMIT 1',
+        'SELECT * FROM accounts WHERE id = ? LIMIT 1',
         [id],
         (err, row) => {
           if (err) return reject(err);
-          resolve(row || null);
+          resolve(row ? formatUser(row) : null);
         }
       );
     });
   }
 }
 
-export async function createUser(username, passwordHash, displayName = null) {
+export async function createUser(username, passwordHash, displayName = null, isAdmin = false) {
   const clean = username.trim();
   const dName = displayName || clean;
   if (isPg) {
     const res = await pgPool.query(
-      'INSERT INTO accounts (username, password_hash, display_name) VALUES ($1, $2, $3) RETURNING id, username, display_name, bio_status, avatar_url, last_seen, created_at',
-      [clean, passwordHash, dName]
+      'INSERT INTO accounts (username, password_hash, display_name, is_admin) VALUES ($1, $2, $3, $4) RETURNING *',
+      [clean, passwordHash, dName, Boolean(isAdmin)]
     );
-    return res.rows[0];
+    return formatUser(res.rows[0]);
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.run(
-        'INSERT INTO accounts (username, password_hash, display_name) VALUES (?, ?, ?)',
-        [clean, passwordHash, dName],
+        'INSERT INTO accounts (username, password_hash, display_name, is_admin) VALUES (?, ?, ?, ?)',
+        [clean, passwordHash, dName, isAdmin ? 1 : 0],
         function (err) {
           if (err) return reject(err);
-          resolve({ id: this.lastID, username: clean, display_name: dName, bio_status: 'Hey there! I am using Horizon Chat.', avatar_url: null, last_seen: new Date().toISOString() });
+          sqliteDb.get('SELECT * FROM accounts WHERE id = ?', [this.lastID], (err2, row) => {
+            if (err2) return reject(err2);
+            resolve(formatUser(row));
+          });
         }
       );
     });
@@ -297,18 +341,18 @@ export async function lookupUser(query) {
   const clean = query.trim().toLowerCase();
   if (isPg) {
     const res = await pgPool.query(
-      'SELECT id, username, display_name, bio_status, avatar_url, last_seen FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      'SELECT * FROM accounts WHERE LOWER(username) = LOWER($1) LIMIT 1',
       [clean]
     );
-    return res.rows[0] || null;
+    return res.rows[0] ? formatUser(res.rows[0]) : null;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.get(
-        'SELECT id, username, display_name, bio_status, avatar_url, last_seen FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
+        'SELECT * FROM accounts WHERE LOWER(username) = LOWER(?) LIMIT 1',
         [clean],
         (err, row) => {
           if (err) return reject(err);
-          resolve(row || null);
+          resolve(row ? formatUser(row) : null);
         }
       );
     });
@@ -563,6 +607,8 @@ function formatMessage(r) {
     deleted_by_users: deletedByUsers,
     readAt: r.read_at ?? r.readAt ?? null,
     read_at: r.read_at ?? r.readAt ?? null,
+    seenAt: r.seen_at ?? r.seenAt ?? r.read_at ?? r.readAt ?? null,
+    seen_at: r.seen_at ?? r.seenAt ?? r.read_at ?? r.readAt ?? null,
     createdAt,
     created_at: createdAt
   };
@@ -576,7 +622,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, seen_at, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
           AND id < $3
@@ -586,7 +632,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, seen_at, created_at
         FROM messages
         WHERE ((sender_id = $1 AND recipient_id = $2) OR (sender_id = $2 AND recipient_id = $1))
         ORDER BY id DESC
@@ -604,7 +650,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
     let params;
     if (cursorId) {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, seen_at, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
           AND id < ?
@@ -614,7 +660,7 @@ export async function getMessagesCursor(currentUserId, targetUserId, cursorId = 
       params = [currentUserId, targetUserId, targetUserId, currentUserId, cursorId, safeLimit];
     } else {
       query = `
-        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+        SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, seen_at, created_at
         FROM messages
         WHERE ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
         ORDER BY id DESC
@@ -708,9 +754,9 @@ export async function markMediaViewed(messageId) {
 export async function updateMessageStatus(messageId, status) {
   if (isPg) {
     let res;
-    if (status === 'READ') {
+    if (status === 'READ' || status === 'SEEN') {
       res = await pgPool.query(
-        "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = $1 RETURNING *",
+        "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP), seen_at = COALESCE(seen_at, CURRENT_TIMESTAMP) WHERE id = $1 RETURNING *",
         [messageId]
       );
     } else {
@@ -722,11 +768,12 @@ export async function updateMessageStatus(messageId, status) {
     return res.rows[0] ? formatMessage(res.rows[0]) : null;
   } else {
     return new Promise((resolve, reject) => {
-      const sql = status === 'READ'
-        ? "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, datetime('now')) WHERE id = ?"
+      const isRead = status === 'READ' || status === 'SEEN';
+      const sql = isRead
+        ? "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, datetime('now')), seen_at = COALESCE(seen_at, datetime('now')) WHERE id = ?"
         : "UPDATE messages SET status = ? WHERE id = ?";
       const params = [messageId];
-      if (status !== 'READ') params.unshift(status);
+      if (!isRead) params.unshift(status);
       sqliteDb.run(sql, params, (err) => {
         if (err) return reject(err);
         sqliteDb.get('SELECT * FROM messages WHERE id = ?', [messageId], (err2, row) => {
@@ -1058,14 +1105,14 @@ export async function pinMessage(messageId, isPinned = true) {
 export async function markConversationRead(currentUserId, partnerId) {
   if (isPg) {
     await pgPool.query(
-      "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE sender_id = $1 AND recipient_id = $2 AND status != 'READ'",
+      "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, CURRENT_TIMESTAMP), seen_at = COALESCE(seen_at, CURRENT_TIMESTAMP) WHERE sender_id = $1 AND recipient_id = $2 AND status != 'READ'",
       [partnerId, currentUserId]
     );
     return true;
   } else {
     return new Promise((resolve, reject) => {
       sqliteDb.run(
-        "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, datetime('now')) WHERE sender_id = ? AND recipient_id = ? AND status != 'READ'",
+        "UPDATE messages SET status = 'READ', read_at = COALESCE(read_at, datetime('now')), seen_at = COALESCE(seen_at, datetime('now')) WHERE sender_id = ? AND recipient_id = ? AND status != 'READ'",
         [partnerId, currentUserId],
         (err) => {
           if (err) return reject(err);
@@ -1079,29 +1126,44 @@ export async function markConversationRead(currentUserId, partnerId) {
 export async function deleteExpiredSeenMessages() {
   try {
     if (isPg) {
-      const res = await pgPool.query(
-        "DELETE FROM messages WHERE status = 'READ' AND read_at IS NOT NULL AND read_at < NOW() - INTERVAL '24 hours'"
+      const selectRes = await pgPool.query(
+        `SELECT id, sender_id, recipient_id, r2_key, attachment_url, message_text 
+         FROM messages 
+         WHERE (seen_at IS NOT NULL AND seen_at < NOW() - INTERVAL '24 hours') 
+            OR (read_at IS NOT NULL AND read_at < NOW() - INTERVAL '24 hours')`
       );
-      if (res && res.rowCount > 0) {
-        console.log(`[EPHEMERAL 24H CLEANUP] Deleted ${res.rowCount} seen messages older than 24 hours.`);
-      }
-      return res ? res.rowCount : 0;
+      const expired = selectRes.rows || [];
+      if (expired.length === 0) return { deletedCount: 0, expiredMessages: [] };
+
+      const ids = expired.map(m => m.id);
+      await pgPool.query('DELETE FROM messages WHERE id = ANY($1::bigint[])', [ids]);
+      console.log(`[EPHEMERAL 24H CLEANUP] Deleted ${expired.length} seen messages older than 24 hours.`);
+      return { deletedCount: expired.length, expiredMessages: expired.map(formatMessage) };
     } else if (sqliteDb) {
       return new Promise((resolve) => {
-        sqliteDb.run(
-          "DELETE FROM messages WHERE status = 'READ' AND read_at IS NOT NULL AND read_at < datetime('now', '-24 hours')",
-          function (err) {
-            if (!err && this.changes > 0) {
-              console.log(`[EPHEMERAL 24H CLEANUP] Deleted ${this.changes} seen messages older than 24 hours.`);
+        sqliteDb.all(
+          `SELECT id, sender_id, recipient_id, r2_key, attachment_url, message_text 
+           FROM messages 
+           WHERE (seen_at IS NOT NULL AND seen_at < datetime('now', '-24 hours')) 
+              OR (read_at IS NOT NULL AND read_at < datetime('now', '-24 hours'))`,
+          (err, rows) => {
+            if (err || !rows || rows.length === 0) {
+              return resolve({ deletedCount: 0, expiredMessages: [] });
             }
-            resolve(this.changes || 0);
+            const ids = rows.map(r => r.id);
+            const placeholders = ids.map(() => '?').join(',');
+            sqliteDb.run(`DELETE FROM messages WHERE id IN (${placeholders})`, ids, function (delErr) {
+              const count = !delErr ? (this.changes || rows.length) : 0;
+              console.log(`[EPHEMERAL 24H CLEANUP] Deleted ${count} seen messages older than 24 hours.`);
+              resolve({ deletedCount: count, expiredMessages: rows.map(formatMessage) });
+            });
           }
         );
       });
     }
   } catch (err) {
     console.error('[EPHEMERAL 24H CLEANUP ERROR]', err);
-    return 0;
+    return { deletedCount: 0, expiredMessages: [] };
   }
 }
 
@@ -1172,7 +1234,7 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
 
   if (isPg) {
     let sql = `
-      SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+      SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, seen_at, created_at
       FROM messages
       WHERE 1=1
     `;
@@ -1187,20 +1249,19 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
     if (sId) {
       params.push(sId);
       sql += ` AND id > $${params.length} ORDER BY id ASC LIMIT 100`;
-    } else if (!tId) {
-      sql += ` AND recipient_id = $1 AND (status != 'READ' OR read_at IS NULL) ORDER BY id DESC LIMIT 100`;
     } else {
-      sql += ` ORDER BY id DESC LIMIT 100`;
+      // If no sinceId, only return unread incoming messages so we never re-append 100 old messages to the bottom
+      sql += ` AND recipient_id = $1 AND (status != 'READ' OR (read_at IS NULL AND seen_at IS NULL)) ORDER BY id ASC LIMIT 100`;
     }
 
     const res = await pgPool.query(sql, params);
     const formatted = res.rows
       .map(formatMessage)
       .filter(m => !m.deletedByUsers.includes(uId));
-    return sId ? formatted : formatted.reverse();
+    return formatted;
   } else {
     let sql = `
-      SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, created_at
+      SELECT id, sender_id, recipient_id, message_text, attachment_type, attachment_url, r2_key, thumbnail_blur, file_size_bytes, status, is_view_once, is_viewed, reply_to_id, reactions, is_pinned, deleted_for_everyone, deleted_by_users, read_at, seen_at, created_at
       FROM messages
       WHERE 1=1
     `;
@@ -1215,11 +1276,9 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
     if (sId) {
       params.push(sId);
       sql += ` AND id > ? ORDER BY id ASC LIMIT 100`;
-    } else if (!tId) {
-      params.push(uId);
-      sql += ` AND recipient_id = ? AND (status != 'READ' OR read_at IS NULL) ORDER BY id DESC LIMIT 100`;
     } else {
-      sql += ` ORDER BY id DESC LIMIT 100`;
+      params.push(uId);
+      sql += ` AND recipient_id = ? AND (status != 'READ' OR (read_at IS NULL AND seen_at IS NULL)) ORDER BY id ASC LIMIT 100`;
     }
 
     return new Promise((resolve, reject) => {
@@ -1228,7 +1287,7 @@ export async function getUnreadOrRecentMessages(currentUserId, targetUserId = nu
         const mapped = (rows || [])
           .map(formatMessage)
           .filter(m => !m.deletedByUsers.includes(uId));
-        resolve(sId ? mapped : mapped.reverse());
+        resolve(mapped);
       });
     });
   }
@@ -1263,6 +1322,186 @@ export async function markPendingMessagesDelivered(recipientId) {
       );
     });
   }
+}
+
+// ----------------------------------------------------
+// Admin Management Methods
+// ----------------------------------------------------
+export async function getAllUsersAdmin() {
+  if (isPg) {
+    const res = await pgPool.query(`
+      SELECT a.id, a.username, a.display_name, a.avatar_url, a.is_admin, a.is_superuser, a.is_active, a.last_seen, a.created_at,
+             COUNT(m.id)::int as message_count
+      FROM accounts a
+      LEFT JOIN messages m ON (m.sender_id = a.id)
+      GROUP BY a.id, a.username, a.display_name, a.avatar_url, a.is_admin, a.is_superuser, a.is_active, a.last_seen, a.created_at
+      ORDER BY a.id ASC
+    `);
+    return res.rows.map(r => ({
+      ...formatUser(r),
+      messageCount: Number(r.message_count || 0)
+    }));
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.all(`
+        SELECT a.id, a.username, a.display_name, a.avatar_url, a.is_admin, a.is_superuser, a.is_active, a.last_seen, a.created_at,
+               COUNT(m.id) as message_count
+        FROM accounts a
+        LEFT JOIN messages m ON (m.sender_id = a.id)
+        GROUP BY a.id, a.username, a.display_name, a.avatar_url, a.is_admin, a.is_superuser, a.is_active, a.last_seen, a.created_at
+        ORDER BY a.id ASC
+      `, (err, rows) => {
+        if (err) return reject(err);
+        resolve((rows || []).map(r => ({
+          ...formatUser(r),
+          messageCount: Number(r.message_count || 0)
+        })));
+      });
+    });
+  }
+}
+
+export async function updateUserStatusAdmin(userId, isActive) {
+  const uId = Number(userId);
+  if (isPg) {
+    const res = await pgPool.query(
+      'UPDATE accounts SET is_active = $1 WHERE id = $2 RETURNING *',
+      [Boolean(isActive), uId]
+    );
+    return res.rows[0] ? formatUser(res.rows[0]) : null;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'UPDATE accounts SET is_active = ? WHERE id = ?',
+        [isActive ? 1 : 0, uId],
+        function(err) {
+          if (err) return reject(err);
+          sqliteDb.get('SELECT * FROM accounts WHERE id = ?', [uId], (err2, row) => {
+            if (err2) return reject(err2);
+            resolve(row ? formatUser(row) : null);
+          });
+        }
+      );
+    });
+  }
+}
+
+export async function resetUserPasswordAdmin(userId, newPasswordHash) {
+  const uId = Number(userId);
+  if (isPg) {
+    const res = await pgPool.query(
+      'UPDATE accounts SET password_hash = $1 WHERE id = $2 RETURNING *',
+      [newPasswordHash, uId]
+    );
+    return res.rows[0] ? formatUser(res.rows[0]) : null;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'UPDATE accounts SET password_hash = ? WHERE id = ?',
+        [newPasswordHash, uId],
+        function(err) {
+          if (err) return reject(err);
+          sqliteDb.get('SELECT * FROM accounts WHERE id = ?', [uId], (err2, row) => {
+            if (err2) return reject(err2);
+            resolve(row ? formatUser(row) : null);
+          });
+        }
+      );
+    });
+  }
+}
+
+export async function getSystemStatsAdmin() {
+  if (isPg) {
+    const res = await pgPool.query(`
+      SELECT 
+        (SELECT COUNT(*)::int FROM accounts) as total_users,
+        (SELECT COUNT(*)::int FROM messages) as total_messages,
+        (SELECT COUNT(*)::int FROM messages WHERE status = 'READ' AND (seen_at IS NOT NULL OR read_at IS NOT NULL)) as seen_messages
+    `);
+    const row = res.rows[0] || {};
+    return {
+      totalUsers: Number(row.total_users || 0),
+      totalMessages: Number(row.total_messages || 0),
+      seenMessages: Number(row.seen_messages || 0)
+    };
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.get(`
+        SELECT 
+          (SELECT COUNT(*) FROM accounts) as total_users,
+          (SELECT COUNT(*) FROM messages) as total_messages,
+          (SELECT COUNT(*) FROM messages WHERE status = 'READ' AND (seen_at IS NOT NULL OR read_at IS NOT NULL)) as seen_messages
+      `, (err, row) => {
+        if (err) return reject(err);
+        const r = row || {};
+        resolve({
+          totalUsers: Number(r.total_users || 0),
+          totalMessages: Number(r.total_messages || 0),
+          seenMessages: Number(r.seen_messages || 0)
+        });
+      });
+    });
+  }
+}
+
+// ----------------------------------------------------
+// Password Reset Workflow
+// ----------------------------------------------------
+export async function setUserResetToken(username, token, expiresAt) {
+  const normalized = username.trim();
+  if (isPg) {
+    const res = await pgPool.query(
+      'UPDATE accounts SET reset_token = $1, reset_token_expires = $2 WHERE LOWER(username) = LOWER($3) RETURNING *',
+      [token, expiresAt, normalized]
+    );
+    return res.rows[0] ? formatUser(res.rows[0]) : null;
+  } else {
+    return new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'UPDATE accounts SET reset_token = ?, reset_token_expires = ? WHERE LOWER(username) = LOWER(?)',
+        [token, expiresAt, normalized],
+        function(err) {
+          if (err) return reject(err);
+          sqliteDb.get('SELECT * FROM accounts WHERE LOWER(username) = LOWER(?)', [normalized], (err2, row) => {
+            if (err2) return reject(err2);
+            resolve(row ? formatUser(row) : null);
+          });
+        }
+      );
+    });
+  }
+}
+
+export async function verifyAndResetPassword(username, token, newPasswordHash) {
+  const normalized = username.trim();
+  const user = await findUserByUsername(normalized);
+  if (!user) return { success: false, error: 'User not found' };
+  if (!user.resetToken || user.resetToken !== token) {
+    return { success: false, error: 'Invalid or expired reset code' };
+  }
+  if (user.resetTokenExpires && new Date(user.resetTokenExpires).getTime() < Date.now()) {
+    return { success: false, error: 'Reset code has expired. Please request a new one.' };
+  }
+
+  if (isPg) {
+    await pgPool.query(
+      'UPDATE accounts SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
+      [newPasswordHash, user.id]
+    );
+  } else {
+    await new Promise((resolve, reject) => {
+      sqliteDb.run(
+        'UPDATE accounts SET password_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?',
+        [newPasswordHash, user.id],
+        (err) => {
+          if (err) return reject(err);
+          resolve();
+        }
+      );
+    });
+  }
+  return { success: true, message: 'Password reset successfully' };
 }
 
 

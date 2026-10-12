@@ -25,7 +25,77 @@ data class User(
     var online: Boolean = false,
 
     @SerializedName("isBlocked")
-    var isBlocked: Boolean = false
+    var isBlocked: Boolean = false,
+
+    @SerializedName("isAdmin")
+    val isAdmin: Boolean = false,
+
+    @SerializedName("isActive")
+    val isActive: Boolean = true
+)
+
+data class ForgotPasswordRequest(
+    @SerializedName("username")
+    val username: String
+)
+
+data class ForgotPasswordResponse(
+    @SerializedName("success")
+    val success: Boolean,
+    @SerializedName("message")
+    val message: String,
+    @SerializedName("resetToken")
+    val resetToken: String? = null
+)
+
+data class ResetPasswordRequest(
+    @SerializedName("username")
+    val username: String,
+    @SerializedName("token")
+    val token: String,
+    @SerializedName("newPassword")
+    val newPassword: String
+)
+
+data class AdminStatsResponse(
+    @SerializedName("totalUsers")
+    val totalUsers: Int = 0,
+    @SerializedName("totalMessages")
+    val totalMessages: Int = 0,
+    @SerializedName("activeConnections")
+    val activeConnections: Int = 0
+)
+
+data class AdminUser(
+    @SerializedName("id")
+    val id: Int,
+    @SerializedName("username")
+    val username: String,
+    @SerializedName("displayName")
+    val displayName: String? = null,
+    @SerializedName("isAdmin")
+    val isAdmin: Boolean = false,
+    @SerializedName("isActive")
+    val isActive: Boolean = true,
+    @SerializedName("messageCount")
+    val messageCount: Int = 0,
+    @SerializedName("online")
+    val online: Boolean = false
+)
+
+data class UpdateUserStatusRequest(
+    @SerializedName("isActive")
+    val isActive: Boolean
+)
+
+data class AdminResetPasswordRequest(
+    @SerializedName("newPassword")
+    val newPassword: String
+)
+
+data class AdminPurgeRequest(
+    @SerializedName("hours")
+    val hours: Int = 24
 )
 
 data class BlockRequest(

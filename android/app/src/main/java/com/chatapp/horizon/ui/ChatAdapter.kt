@@ -124,7 +124,20 @@ class ChatAdapter(
         notifyItemInserted(messages.size - 1)
     }
 
+    fun markAllSentMessagesRead() {
+        for (i in messages.indices) {
+            if (messages[i].senderId == currentUserId && messages[i].status != "READ") {
+                messages[i].status = "READ"
+                notifyItemChanged(i)
+            }
+        }
+    }
+
     fun markMessageRead(messageId: Long) {
+        if (messageId <= 0L) {
+            markAllSentMessagesRead()
+            return
+        }
         val index = messages.indexOfFirst { it.id == messageId }
         if (index != -1) {
             messages[index].status = "READ"
