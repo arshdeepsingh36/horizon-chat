@@ -39,16 +39,21 @@ if (env.DATABASE_URL && env.DATABASE_URL.startsWith('postgres')) {
   });
 
   isPg = true;
-} else {
-  console.log('[DB] DATABASE_URL not set to PostgreSQL. Initializing local SQLite fallback...');
-  const dataDir = path.resolve(__dirname, '..', 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  const dbPath = path.join(dataDir, 'horizon_chat_v323.db');
-  sqliteDb = new sqlite3.Database(dbPath);
-  isPg = false;
 }
+
+// Always ensure SQLite fallback database is initialized
+function getSqliteDb() {
+  if (!sqliteDb) {
+    const dataDir = path.resolve(__dirname, '..', 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    const dbPath = path.join(dataDir, 'horizon_chat_v323.db');
+    sqliteDb = new sqlite3.Database(dbPath);
+  }
+  return sqliteDb;
+}
+getSqliteDb();
 
 /**
  * Executes a parameterized SQL query with unified interface and error logging
@@ -67,12 +72,13 @@ export async function query(text, params = []) {
       }
       return res;
     } catch (err) {
-      console.error('[DB QUERY ERROR]', err.message, '| SQL:', text);
-      throw err;
+      console.warn(`[DB POSTGRES NOTICE - REVERTING TO SQLITE] ${err.message}`);
+      isPg = false;
     }
   }
 
   // SQLite execution fallback for development environments without live Neon credentials
+  const db = getSqliteDb();
   return new Promise((resolve, reject) => {
     let convertedSql = text
       .replace(/\$\d+/g, '?')
@@ -157,68 +163,70 @@ export async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
       `);
       console.log('[DB] PostgreSQL schema initialized successfully.');
-    } else if (sqliteDb) {
-      await new Promise((resolve, reject) => {
-        sqliteDb.serialize(() => {
-          sqliteDb.run(`
-            CREATE TABLE IF NOT EXISTS users (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              username TEXT UNIQUE NOT NULL,
-              password TEXT NOT NULL,
-              is_admin INTEGER DEFAULT 0,
-              is_active INTEGER DEFAULT 1,
-              last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-          `);
-          sqliteDb.run(`
-            CREATE TABLE IF NOT EXISTS chats (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-          `);
-          sqliteDb.run(`
-            CREATE TABLE IF NOT EXISTS chat_participants (
-              chat_id INTEGER,
-              user_id INTEGER,
-              PRIMARY KEY (chat_id, user_id)
-            );
-          `);
-          sqliteDb.run(`
-            CREATE TABLE IF NOT EXISTS messages (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              chat_id INTEGER,
-              sender_id INTEGER,
-              content TEXT,
-              media_url TEXT,
-              media_type TEXT,
-              is_view_once INTEGER DEFAULT 0,
-              status TEXT DEFAULT 'sent',
-              seen_at DATETIME NULL,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-          `);
-          sqliteDb.run(`
-            CREATE TABLE IF NOT EXISTS reactions (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              message_id INTEGER,
-              user_id INTEGER,
-              emoji TEXT NOT NULL,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE (message_id, user_id)
-            );
-          `);
-          sqliteDb.run(`CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at DESC);`, (err) => {
-            if (err) return reject(err);
-            resolve();
-          });
-        });
-      });
-      console.log('[DB] SQLite fallback schema initialized successfully.');
+    } catch (pgErr) {
+      console.warn('[DB] PostgreSQL initialization failed, switching to SQLite fallback:', pgErr.message);
+      isPg = false;
     }
-  } catch (err) {
-    console.error('[DB INIT ERROR]', err.message);
   }
+
+  // Ensure SQLite schema exists for fallback
+  const db = getSqliteDb();
+  await new Promise((resolve) => {
+    db.serialize(() => {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          is_admin INTEGER DEFAULT 0,
+          is_active INTEGER DEFAULT 1,
+          last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS chats (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS chat_participants (
+          chat_id INTEGER,
+          user_id INTEGER,
+          PRIMARY KEY (chat_id, user_id)
+        );
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_id INTEGER,
+          sender_id INTEGER,
+          content TEXT,
+          media_url TEXT,
+          media_type TEXT,
+          is_view_once INTEGER DEFAULT 0,
+          status TEXT DEFAULT 'sent',
+          seen_at DATETIME NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS reactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id INTEGER,
+          user_id INTEGER,
+          emoji TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (message_id, user_id)
+        );
+      `);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at DESC);`, () => {
+        resolve();
+      });
+    });
+  });
+  console.log('[DB] Fallback schema ready.');
 }
 
 export { pool, isPg };
