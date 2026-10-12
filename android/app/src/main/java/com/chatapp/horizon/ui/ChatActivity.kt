@@ -452,15 +452,9 @@ class ChatActivity : AppCompatActivity(), MessageDispatchManager.MessageEventLis
 
     private fun triggerHapticFeedback() {
         try {
-            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(50)
-            }
+            window?.decorView?.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
         } catch (e: Exception) {
-            e.printStackTrace()
+            // ignore
         }
     }
 
